@@ -35,6 +35,15 @@ const PORT = Number(process.env.PORT ?? 3000);
 // 1. Top-level request deserialization mounted strictly before any route handlers
 app.use(express.json({ limit: '64kb' }));
 
+// 2. Defensive HTTP security headers
+app.use((_req: Request, res: Response, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  next();
+});
+
 // In-memory store for saved decisions with session isolation and rate limiting
 interface RateLimitBucket {
   count: number;
@@ -189,12 +198,13 @@ app.post('/api/plan', async (req: Request, res: Response) => {
 
     res.json(responsePayload);
   } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unable to generate exposure plan.';
-    const statusCode = /API_KEY|GEMINI_API_KEY|PERMISSION_DENIED/i.test(message) ? 500 : 502;
+    const rawMessage = err instanceof Error ? err.message : 'Unable to generate exposure plan.';
+    const sanitizedMessage = rawMessage.replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_API_KEY]');
+    const statusCode = /API_KEY|GEMINI_API_KEY|PERMISSION_DENIED/i.test(sanitizedMessage) ? 500 : 502;
     res.status(statusCode).json({
-      error: message,
-      hint: /GEMINI_API_KEY/i.test(message)
-        ? 'Check your GEMINI_API_KEY in Settings > Secrets.'
+      error: sanitizedMessage,
+      hint: /GEMINI_API_KEY/i.test(sanitizedMessage)
+        ? 'Check your GEMINI_API_KEY in server environment settings.'
         : 'Retry the request or switch to offline general safety guidance.',
     });
   }

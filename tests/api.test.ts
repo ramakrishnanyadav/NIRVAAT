@@ -9,7 +9,7 @@ async function mockRequest(
   path: string,
   body?: unknown,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: any }> {
+): Promise<{ status: number; body: any; headers: Headers }> {
   return new Promise((resolve) => {
     const reqHeaders: Record<string, string> = {
       'content-type': 'application/json',
@@ -27,7 +27,7 @@ async function mockRequest(
         });
         const json = await res.json().catch(() => null);
         server.close(() => {
-          resolve({ status: res.status, body: json });
+          resolve({ status: res.status, body: json, headers: res.headers });
         });
       } catch (err) {
         server.close(() => {
@@ -37,6 +37,15 @@ async function mockRequest(
     });
   });
 }
+
+test('Security: defensive HTTP headers are emitted on all API responses', async () => {
+  const res = await mockRequest('GET', '/api/health');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(res.headers.get('x-frame-options'), 'DENY');
+  assert.equal(res.headers.get('referrer-policy'), 'strict-origin-when-cross-origin');
+  assert.equal(res.headers.get('cross-origin-opener-policy'), 'same-origin');
+});
 
 test('API contract: /api/health responds with 200 and service metadata', async () => {
   const res = await mockRequest('GET', '/api/health');
