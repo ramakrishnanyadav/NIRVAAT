@@ -71,16 +71,48 @@ async function generateContentWithFallback(
     : new Error('All fallback Gemini models failed to respond.');
 }
 
-// H3: Deterministic Red-Flag Symptom Pre-Screen (English + Hinglish/Hindi common terms)
+// H3: Deterministic Red-Flag Symptom Pre-Screen (English + Hinglish + Hindi Devanagari)
 const RED_FLAG_PATTERNS: RegExp[] = [
-  /\b(chest pain|chest tightness|tightness in chest|crushing chest|seene mein dard)\b/i,
-  /\b(blue lips|grey lips|gray lips|cyanosis|neele hoth)\b/i,
-  /\b(fainting|fainted|passed out|unconscious|behosh)\b/i,
-  /\b(coughing blood|coughing up blood|hemoptysis|khoon ki khansi)\b/i,
-  /\b(severe breathlessness|worsening breathlessness|gasping for air|struggling to breathe|cannot breathe|can't breathe|saans nahi aa rahi)\b/i,
-  /\b(infant|toddler|baby|newborn).{0,30}\b(respiratory distress|struggling to breathe|ribs pulling|flaring nostrils|not breathing well|gasping)\b/i,
-  /\b(wheeze|wheezing).{0,35}\b(not settling|not responding|still bad|worse after).{0,25}\b(inhaler|reliever|nebulizer|pump)\b/i,
-  /\b(confusion|sudden confusion|disoriented|slurred speech)\b/i,
+  // 1. Chest pain / pressure / tightness
+  /\b(chest pain|chest tightness|tightness in chest|crushing chest|chest pressure)\b/i,
+  /\b(seene\s+(?:me|mein|meinn?)\s+(?:dard|jakdan|jalan|dabaav))\b/i,
+  /(सीने में\s*.{0,15}(?:दर्द|जकड़न|दबाव))/,
+
+  // 2. Cyanosis / Blue or grey lips
+  /\b(?:blue|grey|gray)\s+(?:lips|fingernails|face|skin)\b/i,
+  /\b(?:lips|fingernails|face|skin)\s+(?:turning\s+)?(?:blue|grey|gray)\b/i,
+  /\bcyanosis\b/i,
+  /\b(?:neele?|neela)\s+(?:hoth|honth|naakhun)\b/i,
+  /\b(?:hoth|honth|naakhun)\s+.{0,10}(?:neele?|neela)\b/i,
+  /(?:(?:नीले|भूरे)\s*(?:होंठ|नाखून)|(?:होंठ|नाखून)\s*.{0,10}(?:नीले|भूरे))/,
+
+  // 3. Fainting / Unconsciousness
+  /\b(fainting|fainted|passed out|unconscious|loss of consciousness)\b/i,
+  /\b(behosh(?:i)?|chakkar aake gir)\b/i,
+  /(बेहोश|मूर्छित|अचेत)/,
+
+  // 4. Coughing blood
+  /\b(coughing (?:up )?blood|blood in (?:cough|phlegm|sputum)|hemoptysis)\b/i,
+  /\b(khoon ki khansi|khansi\s+(?:me|mein)\s+khoon)\b/i,
+  /(खांसी में खून|खून की खांसी)/,
+
+  // 5. Severe breathlessness / asphyxia / suffocation
+  /\b(severe breathlessness|worsening breathlessness|difficulty breathing|shortness of breath|gasping for air|struggling to breathe|cannot breathe|can['’]t breathe|unable to breathe)\b/i,
+  /\b(saans\s+(?:nahi|nahin)\s+aa\s+rahi|saans\s+phool\s+rahi|saans\s+lene\s+(?:me|mein)\s+.{0,20}(?:takleef|dikkat|mushkil)|dum\s+ghut(?: raha)?)\b/i,
+  /((?:सांस|साँस)\s*(?:लेने में\s*.{0,20}(?:तकलीफ|दिक्कत|कठिनाई)|नहीं आ रही|फूल रही)|दम\s*घुट)/,
+
+  // 6. Pediatric respiratory distress (nostril flaring, intercostal retractions)
+  /\b(infant|toddler|baby|newborn).{0,35}\b(respiratory distress|struggling to breathe|ribs pulling|flaring nostrils|not breathing well|gasping)\b/i,
+  /(बच्चे|शिशु).{0,30}(?:पसलियां धंस|सांस फूल|सांस लेने में)/,
+
+  // 7. Unrelieved wheezing with inhaler
+  /\b(wheeze|wheezing).{0,40}\b(not settling|not responding|still bad|worse after|theek nahi|shant nahi).{0,25}\b(inhaler|reliever|nebulizer|pump)\b/i,
+  /\b(inhaler|reliever|nebulizer|pump)\b.{0,35}\b(?:ke baad bhi|after).{0,25}\b(?:wheeze|saans)\b/i,
+  /(?:इनहेलर|पंप).{0,30}(?:के बाद भी|शांत नहीं).{0,20}(?:सांस|घरघराहट)/,
+
+  // 8. Acute neurological confusion / altered sensorium (never bare 'confusion')
+  /\b(sudden confusion|mental confusion|acute confusion|disoriented|slurred speech|acting confused)\b/i,
+  /(अचानक भ्रम|असंगत बोल)/,
 ];
 
 export function detectRedFlagSymptom(query: string): boolean {
