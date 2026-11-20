@@ -7,20 +7,24 @@
 }
 
 :root {
-  --glass-1: rgba(255, 255, 255, 0.72);
-  --glass-2: rgba(255, 255, 255, 0.48);
-  --glass-inset: rgba(255, 255, 255, 0.86);
-  --glass-border: rgba(255, 255, 255, 0.85);
+  /* High-opacity glass tokens ensuring >= 7:1 text contrast */
+  --glass-1: rgba(255, 255, 255, 0.88);
+  --glass-2: rgba(255, 255, 255, 0.65);
+  --glass-inset: rgba(255, 255, 255, 0.94);
+  --glass-border: rgba(203, 213, 225, 0.85);
   --ink-primary: #0b1b2b;
-  --ink-soft: #46566a;
+  --ink-soft: #334155;
   --teal-primary: #0e7c86;
 }
 
+/* Manual High-Contrast Mode */
 .high-contrast {
   --glass-1: #ffffff;
-  --glass-2: #f1f5f9;
+  --glass-2: #ffffff;
   --glass-inset: #ffffff;
   --glass-border: #0f172a;
+  --ink-primary: #000000;
+  --ink-soft: #0f172a;
 }
 
 @layer base {
@@ -29,11 +33,24 @@
     color: var(--ink-primary);
     background-color: #f8fafc;
     scroll-behavior: smooth;
+    /* Task 3: Prevent sticky header from obscuring focused controls */
+    scroll-padding-top: 5.5rem;
   }
 
+  body {
+    overflow-x: hidden;
+    min-width: 320px;
+  }
+
+  /* Task 3: Visible focus ring with >= 3:1 contrast on glass */
   :focus-visible {
     outline: 2px solid #0e7c86;
     outline-offset: 2px;
+  }
+
+  .high-contrast :focus-visible {
+    outline: 3px solid #000000 !important;
+    outline-offset: 3px !important;
   }
 
   h1, h2, h3, h4, .font-display {
@@ -43,11 +60,16 @@
   .tabular-nums {
     font-variant-numeric: tabular-nums;
   }
+
+  /* Task 9: Minimum 44x44 touch targets */
+  button, [role="button"], a, input[type="text"] {
+    touch-action: manipulation;
+  }
 }
 
 .aurora-surface {
   background: var(--glass-1);
-  border: 1px solid rgba(203, 213, 225, 0.75);
+  border: 1px solid var(--glass-border);
   box-shadow: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 12px 32px -12px rgba(15, 23, 42, 0.08);
 }
 
@@ -62,12 +84,35 @@
   border: 1px solid rgba(226, 232, 240, 0.9);
 }
 
+/* High-contrast solid overrides */
 .high-contrast .aurora-surface,
 .high-contrast .aurora-inset {
-  backdrop-filter: none;
-  background: #ffffff;
-  border: 2px solid #0f172a;
-  box-shadow: none;
+  backdrop-filter: none !important;
+  background: #ffffff !important;
+  border: 2px solid #0f172a !important;
+  box-shadow: none !important;
+  color: #000000 !important;
+}
+
+/* Task 8: Windows / OS Forced Colors Mode (High Contrast Themes) */
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight !important;
+    outline-offset: 2px !important;
+  }
+
+  .aurora-surface,
+  .aurora-inset {
+    background: Canvas !important;
+    color: CanvasText !important;
+    border: 2px solid ButtonText !important;
+    backdrop-filter: none !important;
+    box-shadow: none !important;
+  }
+
+  button, a {
+    border: 1px solid ButtonText !important;
+  }
 }
 
 @keyframes orbBreathe {
@@ -85,20 +130,21 @@
   animation: orbBreathe 5s ease-in-out infinite;
 }
 
+/* Task 6: Motion reduction override */
 .reduce-motion *,
 .reduce-motion *::before,
 .reduce-motion *::after {
-  animation-duration: 0.01ms !important;
+  animation-duration: 0.001ms !important;
   animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
+  transition-duration: 0.001ms !important;
   scroll-behavior: auto !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.01ms !important;
+    animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
 }

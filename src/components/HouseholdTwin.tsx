@@ -202,6 +202,19 @@ export const HouseholdTwin: React.FC<HouseholdTwinProps> = ({
 
   return (
     <div className="space-y-6">
+      <div>
+        <h1
+          id="page-heading"
+          tabIndex={-1}
+          className="text-2xl font-bold tracking-tight text-slate-900 outline-none"
+        >
+          Household Digital Twin & Exposure Simulator
+        </h1>
+        <p className="mt-1 text-sm text-slate-600">
+          Model infiltration, air purification, and clinical exposure priority for every family member.
+        </p>
+      </div>
+
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Family & Priority Protection Order */}
         <section className="aurora-surface rounded-2xl p-5 space-y-4">

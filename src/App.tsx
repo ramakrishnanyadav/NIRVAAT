@@ -8,6 +8,8 @@ import {
   Undo2,
 } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation, Link, NavLink } from 'react-router-dom';
+import { MotionConfig } from 'motion/react';
 import { AuditAndSettingsView } from './components/AuditAndSettingsView';
 import { BreathOrb } from './components/BreathOrb';
 import { CommandItem, CommandPalette } from './components/CommandPalette';
@@ -193,18 +195,12 @@ const QUICK_SCENARIOS: Array<{ id: string; labelEn: string; labelHi: string; pro
 
 const VALID_ROUTES: ActiveRoute[] = ['today', 'forecast', 'household', 'learn', 'audit', 'emergency'];
 
-function getInitialRoute(): ActiveRoute {
-  if (typeof window !== 'undefined') {
-    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase() as ActiveRoute;
-    if (VALID_ROUTES.includes(hash)) {
-      return hash;
-    }
-  }
-  return 'today';
-}
-
 export default function App() {
-  const [route, setRoute] = useState<ActiveRoute>(getInitialRoute);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activePath = location.pathname.replace(/^\//, '').toLowerCase() as ActiveRoute;
+  const route: ActiveRoute = VALID_ROUTES.includes(activePath) ? activePath : 'today';
+
   const [lang, setLang] = useState<UiLang>('en');
   const [channel, setChannel] = useState<ChannelType>('APP');
   const [reduceMotion, setReduceMotion] = useState(() => {
@@ -214,26 +210,35 @@ export default function App() {
     return false;
   });
   const [highContrast, setHighContrast] = useState(false);
+  const [routeAnnouncement, setRouteAnnouncement] = useState('');
 
   const navigateTo = useCallback((newRoute: ActiveRoute) => {
-    setRoute(newRoute);
-    if (typeof window !== 'undefined' && window.location.hash !== `#${newRoute}`) {
-      window.location.hash = `#${newRoute}`;
-    }
-  }, []);
+    navigate(`/${newRoute}`);
+  }, [navigate]);
 
-  // Sync route state with browser back/forward history
+  // Route change focus management and screen reader live announcement
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onHashChange = () => {
-      const currentHash = window.location.hash.replace(/^#\/?/, '').toLowerCase() as ActiveRoute;
-      if (VALID_ROUTES.includes(currentHash)) {
-        setRoute(currentHash);
-      }
+    window.scrollTo(0, 0);
+    const heading = document.getElementById('page-heading');
+    if (heading) {
+      heading.focus();
+    }
+    const routeNames: Record<string, { en: string; hi: string }> = {
+      '/today': { en: 'Today Action Plan', hi: 'आज की कार्य योजना' },
+      '/forecast': { en: '24-Hour Forecast & Inversion Timeline', hi: '24 घंटे का पूर्वानुमान' },
+      '/household': { en: 'Household Twin & Exposure Profile', hi: 'पारिवारिक प्रोफ़ाइल' },
+      '/learn': { en: 'Smog Science Library', hi: 'स्मॉग विज्ञान पुस्तकालय' },
+      '/audit': { en: 'Audit & System Settings', hi: 'ऑडिट और सिस्टम सेटिंग्स' },
+      '/emergency': { en: 'Emergency Medical & SOS Support', hi: 'आपातकालीन चिकित्सा सहायता' },
     };
-    window.addEventListener('hashchange', onHashChange);
-    return () => window.removeEventListener('hashchange', onHashChange);
-  }, []);
+    const current = routeNames[location.pathname] || { en: 'Page Loaded', hi: 'पेज लोड हुआ' };
+    setRouteAnnouncement(lang === 'hi' ? current.hi : current.en);
+  }, [location.pathname, lang]);
+
+  // Dynamic language attribute synchronization
+  useEffect(() => {
+    document.documentElement.lang = lang === 'hi' ? 'hi-IN' : 'en-IN';
+  }, [lang]);
 
   // Listen to OS prefers-reduced-motion live changes
   useEffect(() => {
@@ -597,14 +602,20 @@ export default function App() {
   ];
 
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-[#F8FAFC] text-[#0B1B2B]">
-      {/* Skip to content link for keyboard/screen-reader accessibility */}
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-teal-800 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
-      >
-        Skip to main content
-      </a>
+    <MotionConfig reducedMotion={reduceMotion ? 'always' : 'user'}>
+      <div className="relative min-h-screen overflow-x-hidden bg-[#F8FAFC] text-[#0B1B2B]">
+        {/* Skip to content link for keyboard/screen-reader accessibility */}
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-teal-800 focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-white"
+        >
+          Skip to main content
+        </a>
+
+        {/* Live route announcement for screen readers */}
+        <div className="sr-only" aria-live="polite" aria-atomic="true">
+          {routeAnnouncement}
+        </div>
 
       {/* Aurora Air luminous backdrop */}
       {!highContrast && (
@@ -620,19 +631,18 @@ export default function App() {
       )}
 
       {/* Top Bar Contract: Strict 3-zone header */}
-      <header className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
+      <header role="banner" className="sticky top-0 z-30 border-b border-slate-200/80 bg-white/85 backdrop-blur-md">
         <div className="mx-auto flex max-w-[1280px] items-center justify-between gap-8 px-4 py-3.5 sm:px-6">
           {/* Zone 1: Single text element wordmark */}
-          <button
-            type="button"
-            onClick={() => navigateTo('today')}
+          <Link
+            to="/today"
             className="font-display text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-indigo-600 rounded-md"
           >
             {strings.brand}
-          </button>
+          </Link>
 
           {/* Zone 2: 5 concise single-line nav links */}
-          <nav aria-label="Primary" className="hidden md:flex items-center gap-6 text-sm font-medium">
+          <nav aria-label="Primary" role="navigation" className="hidden md:flex items-center gap-6 text-sm font-medium">
             {(
               [
                 ['today', strings.nav.today],
@@ -642,10 +652,9 @@ export default function App() {
                 ['audit', strings.nav.audit],
               ] as const
             ).map(([key, label]) => (
-              <button
+              <NavLink
                 key={key}
-                type="button"
-                onClick={() => navigateTo(key)}
+                to={`/${key}`}
                 aria-current={route === key ? 'page' : undefined}
                 className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                   route === key
@@ -654,20 +663,19 @@ export default function App() {
                 }`}
               >
                 {label}
-              </button>
+              </NavLink>
             ))}
           </nav>
 
           {/* Zone 3: 1 primary action */}
           <div className="flex items-center shrink-0">
-            <button
-              type="button"
-              onClick={() => navigateTo('emergency')}
+            <Link
+              to="/emergency"
               className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-xs font-semibold text-red-900 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0"
             >
               <ShieldAlert className="h-3.5 w-3.5 text-red-700" aria-hidden="true" />
               <span>{strings.actions.urgentHelp}</span>
-            </button>
+            </Link>
           </div>
         </div>
       </header>
@@ -692,7 +700,7 @@ export default function App() {
       )}
 
       {/* Main Content Viewport */}
-      <main id="main-content" className="mx-auto max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:pb-12">
+      <main id="main-content" role="main" tabIndex={-1} className="mx-auto max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:pb-12 outline-none">
         {route === 'emergency' ? (
           <EmergencyView
             emergencyNumber={selectedRegion.emergency_number}
@@ -739,7 +747,7 @@ export default function App() {
                   <span>Coarse Grid: {selectedRegion.grid_id}</span>
                   <span>Official Portal: {selectedRegion.official_source}</span>
                 </div>
-                <h1 className="text-xl font-bold text-slate-900">
+                <h1 id="page-heading" tabIndex={-1} className="text-xl font-bold text-slate-900 outline-none">
                   {selectedRegion.city} · {selectedRegion.neighborhood}
                 </h1>
                 {scrubbedPoint ? (
@@ -1011,6 +1019,7 @@ export default function App() {
       {/* Mobile Bottom Tab Bar (<=15% viewport height) */}
       <nav
         aria-label="Mobile Navigation"
+        role="navigation"
         className="fixed bottom-0 inset-x-0 z-30 flex items-center justify-around border-t border-slate-200 bg-white/95 px-2 py-1.5 backdrop-blur-md md:hidden"
       >
         {(
@@ -1022,20 +1031,20 @@ export default function App() {
             ['audit', 'Audit'],
           ] as const
         ).map(([key, label]) => (
-          <button
+          <NavLink
             key={key}
-            type="button"
-            onClick={() => navigateTo(key)}
+            to={`/${key}`}
             className={`min-h-[44px] rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
               route === key ? 'text-teal-800 bg-teal-50' : 'text-slate-600'
             }`}
           >
             {label}
-          </button>
+          </NavLink>
         ))}
       </nav>
 
       <CommandPalette open={cmdOpen} onClose={() => setCmdOpen(false)} items={commandItems} />
     </div>
+    </MotionConfig>
   );
 }

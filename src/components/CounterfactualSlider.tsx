@@ -12,36 +12,36 @@ export const CounterfactualSlider: React.FC<CounterfactualSliderProps> = ({ acti
   return (
     <div className="aurora-inset rounded-xl p-4 space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-semibold text-slate-800">
+        <span className="text-xs font-bold text-slate-900">
           Counterfactual comparison: {action.effect.metric}
         </span>
-        <span className="text-xs font-mono text-slate-500 tabular-nums">
-          Ref: {action.effect.tool_ref}
+        <span className="text-xs font-mono font-medium text-slate-700 tabular-nums">
+          Trace: {action.effect.tool_ref}
         </span>
       </div>
 
       {hasNumbers ? (
         <>
-          <div className="relative h-24 overflow-hidden rounded-xl border border-slate-200 bg-amber-50/70">
+          <div className="relative h-24 overflow-hidden rounded-xl border border-slate-300 bg-amber-50">
             {/* Left / Underlying: Without action */}
             <div className="absolute inset-0 flex items-center justify-between px-4">
               <div>
-                <p className="text-[11px] font-medium text-amber-900">Without this action</p>
-                <p className="mt-0.5 font-mono text-lg font-semibold text-amber-950 tabular-nums">
+                <p className="text-xs font-bold text-amber-950">Without this action</p>
+                <p className="mt-0.5 font-mono text-lg font-bold text-amber-950 tabular-nums">
                   {action.effect.without}
                 </p>
               </div>
-              <span className="text-xs text-amber-800/80 font-medium">Unmitigated dose</span>
+              <span className="text-xs text-amber-900 font-semibold">Unmitigated baseline</span>
             </div>
 
             {/* Right / Clipped overlay: With action */}
             <div
-              className="absolute inset-0 flex items-center justify-between bg-teal-50 px-4 border-l-2 border-teal-700"
+              className="absolute inset-0 flex items-center justify-between bg-teal-50 px-4 border-l-2 border-teal-800"
               style={{ clipPath: `inset(0 0 0 ${splitPct}%)` }}
             >
               <div className="ml-auto text-right">
-                <p className="text-[11px] font-medium text-teal-900">With this action</p>
-                <p className="mt-0.5 font-mono text-lg font-semibold text-teal-950 tabular-nums">
+                <p className="text-xs font-bold text-teal-950">With this action</p>
+                <p className="mt-0.5 font-mono text-lg font-bold text-teal-950 tabular-nums">
                   {action.effect.with}
                 </p>
               </div>
@@ -50,7 +50,7 @@ export const CounterfactualSlider: React.FC<CounterfactualSliderProps> = ({ acti
 
           <div className="space-y-1">
             <label htmlFor={`cf-slider-${action.rank}`} className="sr-only">
-              Compare without vs with action exposure
+              Compare without action ({action.effect.without}) versus with action ({action.effect.with})
             </label>
             <input
               id={`cf-slider-${action.rank}`}
@@ -59,20 +59,24 @@ export const CounterfactualSlider: React.FC<CounterfactualSliderProps> = ({ acti
               max={90}
               value={splitPct}
               onChange={(e) => setSplitPct(Number(e.target.value))}
-              className="w-full accent-teal-700 cursor-ew-resize"
+              aria-valuemin={10}
+              aria-valuemax={90}
+              aria-valuenow={splitPct}
+              aria-valuetext={`Split comparison at ${splitPct}%: Without is ${action.effect.without}, with is ${action.effect.with}`}
+              className="w-full accent-teal-700 cursor-ew-resize min-h-[36px]"
             />
-            <div className="flex items-center justify-between text-xs text-slate-600 tabular-nums">
-              <span>Slide to compare baseline vs protected</span>
-              <span className="font-mono font-semibold text-teal-800">
-                Change: {action.effect.change_range} · {action.effect.confidence} confidence
+            <div className="flex items-center justify-between text-xs text-slate-700 tabular-nums font-medium">
+              <span>Drag to visually inspect baseline vs protected</span>
+              <span className="font-mono font-bold text-teal-900">
+                Shift: {action.effect.change_range} ({action.effect.confidence} confidence)
               </span>
             </div>
           </div>
         </>
       ) : (
-        <div className="rounded-lg border border-slate-200 bg-white px-3.5 py-2.5 text-xs text-slate-700">
-          Qualitative expected impact:{' '}
-          <strong className="font-semibold text-teal-800">{action.effect.change_range}</strong> (
+        <div className="rounded-lg border border-slate-300 bg-white px-3.5 py-2.5 text-xs text-slate-800">
+          Qualitative modeled shift:{' '}
+          <strong className="font-bold text-teal-900">{action.effect.change_range}</strong> (
           {action.effect.confidence} confidence · live quantitative model unavailable).
         </div>
       )}

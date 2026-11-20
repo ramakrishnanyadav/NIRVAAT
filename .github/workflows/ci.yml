@@ -26,8 +26,11 @@ jobs:
       - name: Static Analysis & TypeScript Typecheck
         run: npm run lint
 
-      - name: Run Test Pyramid (Physics, Verifier, Regressions, Red-Flag, API)
+      - name: Run Test Pyramid (Physics, Verifier, Regressions, Red-Flag, API, A11y Axe)
         run: npm test
+
+      - name: Glass Contrast & Color Ratio Audit
+        run: npm run test:contrast
 
       - name: Measure Test Coverage
         run: npm run test:coverage

@@ -35,6 +35,15 @@ export const LearnView: React.FC<LearnViewProps> = ({ entries }) => {
 
   return (
     <div className="space-y-6">
+      <header className="border-b border-slate-200/80 pb-3">
+        <h1 id="page-heading" tabIndex={-1} className="text-xl font-bold text-slate-900 focus:outline-none">
+          Public Health Guidance &amp; Evidence Library
+        </h1>
+        <p className="mt-1 text-xs text-slate-600">
+          WHO, CPCB, and peer-reviewed aerosol guidance graded by clinical and physical evidence strength.
+        </p>
+      </header>
+
       {/* DIY Box Fan Schematic + Mask Fit Guide */}
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="aurora-surface rounded-2xl p-5 space-y-3">

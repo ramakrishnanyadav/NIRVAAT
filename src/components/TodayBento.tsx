@@ -53,7 +53,11 @@ export const TodayBento: React.FC<TodayBentoProps> = ({
           <p className="text-xs font-medium text-teal-800">
             {selectedRegion.city} · {selectedRegion.neighborhood} · {profile.members.length} household members
           </p>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-950 [text-wrap:balance]">
+          <h1
+            id="page-heading"
+            tabIndex={-1}
+            className="text-2xl font-bold tracking-tight text-slate-950 [text-wrap:balance] outline-none"
+          >
             {strings.today.headline}
           </h1>
           <p className="text-xs leading-relaxed text-slate-600">{strings.today.subtitle}</p>
