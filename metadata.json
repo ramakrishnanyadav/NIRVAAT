@@ -1,0 +1,6 @@
+{
+  "name": "NIRVAAT",
+  "description": "Exposure-reduction copilot for families and communities dealing with severe winter smog and urban air pollution.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
