@@ -385,9 +385,25 @@ const BANNED_ADVICE_REGEXES: Array<{ rx: RegExp; rule: string; fix: string }> = 
     fix: 'Never recommend masks for children under age 2.',
   },
   {
-    rx: /\b(stop|discontinue|reduce|increase|change)\b.{0,25}\b(inhaler|steroid|medication|medicine|dose|dosage)\b/i,
+    // Block advice telling users to alter/stop medication, but allow disclaimers like "do not stop/alter"
+    rx: /(?<!\b(?:do\s+not|never|don['’]t)\s+)\b(?:stop|discontinue|alter|change|double)\b.{0,25}\b(?:inhaler|steroid|medication|medicine|prescription|pills?|reliever|nebulizer)\b/i,
     rule: 'V3_NO_MEDICATION_CHANGE',
     fix: 'Remove any advice to start, stop, or alter prescribed medication.',
+  },
+  {
+    rx: /(?<!\b(?:do\s+not|never|don['’]t)\s+)\b(?:increase|reduce|stop|change|alter|double)\b.{0,25}\b(?:inhaler|medication|medicine|steroid|drug|puff|pill)\s+(?:dose|dosage)\b/i,
+    rule: 'V3_NO_MEDICATION_CHANGE',
+    fix: 'Remove any advice to alter medication doses.',
+  },
+  {
+    rx: /\b(?:increase|double)\s+(?:your\s+)?(?:inhaler\s+)?(?:dose|dosage)\b/i,
+    rule: 'V3_NO_MEDICATION_CHANGE',
+    fix: 'Never advise increasing medication dosage.',
+  },
+  {
+    rx: /\b(?:medicine|puff|steroid)\s+dosage\b/i,
+    rule: 'V3_NO_MEDICATION_CHANGE',
+    fix: 'Remove any reference to medicine dosage.',
   },
 ];
 
@@ -475,17 +491,80 @@ export function auditDraftPlan(
     }
   }
 
-  // V1: Tool reference provenance check when in tier_A
+  // V1: Tool reference provenance & numeric integrity check when in tier_A
   const validRefs = new Set(traces.map((t) => t.call_id));
   if (expectedStatus === 'tier_A') {
     for (const action of draft.actions) {
       if (action.effect.tool_ref && !validRefs.has(action.effect.tool_ref)) {
-        // Check if we can match by nearest impact/forecast call_id, otherwise flag
         violations.push({
           rule: 'V1_TOOL_REF',
           field: `actions[${action.rank}].effect.tool_ref`,
           fix: `tool_ref "${action.effect.tool_ref}" must match a real call_id from TOOL_RESULTS.`,
         });
+      } else if (action.effect.tool_ref) {
+        const trace = traces.find((t) => t.call_id === action.effect.tool_ref);
+        const val = trace?.result && typeof trace.result === 'object'
+          ? ((trace.result as Record<string, unknown>).value as Record<string, unknown> | undefined)
+          : undefined;
+
+        if (val && typeof val === 'object') {
+          const expectedWith = typeof val.with === 'string' ? val.with : null;
+          const expectedWithout = typeof val.without === 'string' ? val.without : null;
+          const expectedChange = typeof val.change_range === 'string' ? val.change_range : null;
+
+          const extractNums = (s: string | null) => (s ? (s.match(/\d+(?:\.\d+)?/g) || []).map(Number) : []);
+
+          if (action.effect.with && expectedWith) {
+            const draftNums = extractNums(action.effect.with);
+            const expectedNums = extractNums(expectedWith);
+            if (draftNums.length > 0 && expectedNums.length > 0) {
+              const minExp = Math.min(...expectedNums) * 0.8;
+              const maxExp = Math.max(...expectedNums) * 1.2;
+              const hasMatch = draftNums.some((n) => n >= minExp && n <= maxExp);
+              if (!hasMatch) {
+                violations.push({
+                  rule: 'V1_NUMERIC_INTEGRITY_MISMATCH',
+                  field: `actions[${action.rank}].effect.with`,
+                  fix: `Numeric value "${action.effect.with}" contradicts tool result "${expectedWith}".`,
+                });
+              }
+            }
+          }
+
+          if (action.effect.without && expectedWithout) {
+            const draftNums = extractNums(action.effect.without);
+            const expectedNums = extractNums(expectedWithout);
+            if (draftNums.length > 0 && expectedNums.length > 0) {
+              const minExp = Math.min(...expectedNums) * 0.8;
+              const maxExp = Math.max(...expectedNums) * 1.2;
+              const hasMatch = draftNums.some((n) => n >= minExp && n <= maxExp);
+              if (!hasMatch) {
+                violations.push({
+                  rule: 'V1_NUMERIC_INTEGRITY_MISMATCH',
+                  field: `actions[${action.rank}].effect.without`,
+                  fix: `Numeric value "${action.effect.without}" contradicts tool result "${expectedWithout}".`,
+                });
+              }
+            }
+          }
+
+          if (action.effect.change_range && expectedChange) {
+            const draftNums = extractNums(action.effect.change_range);
+            const expectedNums = extractNums(expectedChange);
+            if (draftNums.length > 0 && expectedNums.length > 0) {
+              const minExp = Math.min(...expectedNums) * 0.75;
+              const maxExp = Math.max(...expectedNums) * 1.25;
+              const hasMatch = draftNums.some((n) => n >= minExp && n <= maxExp);
+              if (!hasMatch) {
+                violations.push({
+                  rule: 'V1_NUMERIC_INTEGRITY_MISMATCH',
+                  field: `actions[${action.rank}].effect.change_range`,
+                  fix: `Percentage change "${action.effect.change_range}" contradicts tool result "${expectedChange}".`,
+                });
+              }
+            }
+          }
+        }
       }
     }
   } else if (expectedStatus === 'tier_C' || expectedStatus === 'tier_D') {
