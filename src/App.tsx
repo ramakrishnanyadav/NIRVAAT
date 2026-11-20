@@ -192,12 +192,58 @@ const QUICK_SCENARIOS: Array<{ id: string; labelEn: string; labelHi: string; pro
   },
 ];
 
+const VALID_ROUTES: ActiveRoute[] = ['today', 'forecast', 'household', 'learn', 'audit', 'emergency'];
+
+function getInitialRoute(): ActiveRoute {
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase() as ActiveRoute;
+    if (VALID_ROUTES.includes(hash)) {
+      return hash;
+    }
+  }
+  return 'today';
+}
+
 export default function App() {
-  const [route, setRoute] = useState<ActiveRoute>('today');
+  const [route, setRoute] = useState<ActiveRoute>(getInitialRoute);
   const [lang, setLang] = useState<UiLang>('en');
   const [channel, setChannel] = useState<ChannelType>('APP');
-  const [reduceMotion, setReduceMotion] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(() => {
+    if (typeof window !== 'undefined' && window.matchMedia) {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    }
+    return false;
+  });
   const [highContrast, setHighContrast] = useState(false);
+
+  const navigateTo = useCallback((newRoute: ActiveRoute) => {
+    setRoute(newRoute);
+    if (typeof window !== 'undefined' && window.location.hash !== `#${newRoute}`) {
+      window.location.hash = `#${newRoute}`;
+    }
+  }, []);
+
+  // Sync route state with browser back/forward history
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onHashChange = () => {
+      const currentHash = window.location.hash.replace(/^#\/?/, '').toLowerCase() as ActiveRoute;
+      if (VALID_ROUTES.includes(currentHash)) {
+        setRoute(currentHash);
+      }
+    };
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  // Listen to OS prefers-reduced-motion live changes
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const onChange = (e: MediaQueryListEvent) => setReduceMotion(e.matches);
+    mql.addEventListener?.('change', onChange);
+    return () => mql.removeEventListener?.('change', onChange);
+  }, []);
 
   const [regions, setRegions] = useState<RegionConfig[]>([DEFAULT_REGION]);
   const [selectedRegion, setSelectedRegion] = useState<RegionConfig>(DEFAULT_REGION);
@@ -412,7 +458,7 @@ export default function App() {
       setAuditResult(data.audit ?? null);
       setModelUsed(data.model_used ?? null);
       setCompletedRanks([]);
-      setRoute('today');
+      navigateTo('today');
     } catch {
       setPlanError('Network error while contacting NIRVAAT engine. Your prompt was kept intact.');
     } finally {
@@ -523,16 +569,16 @@ export default function App() {
   }, [displayPm25]);
 
   const commandItems: CommandItem[] = [
-    { id: 'nav-today', label: strings.nav.today, section: 'Navigate', onSelect: () => setRoute('today') },
-    { id: 'nav-forecast', label: strings.nav.forecast, section: 'Navigate', onSelect: () => setRoute('forecast') },
-    { id: 'nav-household', label: strings.nav.household, section: 'Navigate', onSelect: () => setRoute('household') },
-    { id: 'nav-learn', label: strings.nav.learn, section: 'Navigate', onSelect: () => setRoute('learn') },
-    { id: 'nav-audit', label: strings.nav.audit, section: 'Navigate', onSelect: () => setRoute('audit') },
+    { id: 'nav-today', label: strings.nav.today, section: 'Navigate', onSelect: () => navigateTo('today') },
+    { id: 'nav-forecast', label: strings.nav.forecast, section: 'Navigate', onSelect: () => navigateTo('forecast') },
+    { id: 'nav-household', label: strings.nav.household, section: 'Navigate', onSelect: () => navigateTo('household') },
+    { id: 'nav-learn', label: strings.nav.learn, section: 'Navigate', onSelect: () => navigateTo('learn') },
+    { id: 'nav-audit', label: strings.nav.audit, section: 'Navigate', onSelect: () => navigateTo('audit') },
     {
       id: 'nav-emergency',
       label: strings.nav.emergency,
       section: 'Urgent',
-      onSelect: () => setRoute('emergency'),
+      onSelect: () => navigateTo('emergency'),
     },
     {
       id: 'toggle-lang',
@@ -580,7 +626,7 @@ export default function App() {
           {/* Zone 1: Single text element wordmark */}
           <button
             type="button"
-            onClick={() => setRoute('today')}
+            onClick={() => navigateTo('today')}
             className="font-display text-lg font-bold tracking-tight text-slate-900 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-indigo-600 rounded-md"
           >
             {strings.brand}
@@ -600,7 +646,7 @@ export default function App() {
               <button
                 key={key}
                 type="button"
-                onClick={() => setRoute(key)}
+                onClick={() => navigateTo(key)}
                 aria-current={route === key ? 'page' : undefined}
                 className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b-2 ${
                   route === key
@@ -617,7 +663,7 @@ export default function App() {
           <div className="flex items-center shrink-0">
             <button
               type="button"
-              onClick={() => setRoute('emergency')}
+              onClick={() => navigateTo('emergency')}
               className="inline-flex min-h-[40px] items-center gap-1.5 rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-xs font-semibold text-red-900 hover:bg-red-100 transition-colors whitespace-nowrap shrink-0"
             >
               <ShieldAlert className="h-3.5 w-3.5 text-red-700" aria-hidden="true" />
@@ -746,7 +792,7 @@ export default function App() {
             emergencyNumber={selectedRegion.emergency_number}
             lang={lang}
             strings={strings}
-            onBack={() => setRoute('today')}
+            onBack={() => navigateTo('today')}
           />
         ) : route === 'forecast' ? (
           <div className="space-y-6">
@@ -848,7 +894,7 @@ export default function App() {
             }}
             onApplyAndRefreshPlan={() => {
               setHasCustomQuery(false);
-              setRoute('today');
+              navigateTo('today');
             }}
           />
         ) : route === 'learn' ? (
@@ -876,7 +922,7 @@ export default function App() {
               setModelUsed(rec.model_used);
               setChannel(rec.channel);
               setLastSubmittedQuery(rec.query);
-              setRoute('today');
+              navigateTo('today');
             }}
             onDeleteHistory={handleDeleteHistory}
           />
@@ -923,7 +969,7 @@ export default function App() {
                     <span>Budget: {profile.constraints.budget_band.replace('_', ' ')}</span>
                     <button
                       type="button"
-                      onClick={() => setRoute('household')}
+                      onClick={() => navigateTo('household')}
                       className="font-semibold text-teal-800 hover:underline"
                     >
                       Edit household
@@ -1133,7 +1179,7 @@ export default function App() {
                   onToggleDone={handleToggleDone}
                   onInspectToolRef={(ref) => {
                     setHighlightedToolRef(ref);
-                    setRoute('audit');
+                    navigateTo('audit');
                   }}
                   onReplyClarify={(ans) => {
                     const combined = `${lastSubmittedQuery}\nAdditional detail: ${ans}`;
@@ -1210,7 +1256,7 @@ export default function App() {
           <button
             key={key}
             type="button"
-            onClick={() => setRoute(key)}
+            onClick={() => navigateTo(key)}
             className={`min-h-[44px] rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
               route === key ? 'text-teal-800 bg-teal-50' : 'text-slate-600'
             }`}

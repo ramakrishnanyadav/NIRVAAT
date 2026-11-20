@@ -31,6 +31,11 @@
     scroll-behavior: smooth;
   }
 
+  :focus-visible {
+    outline: 2px solid #0e7c86;
+    outline-offset: 2px;
+  }
+
   h1, h2, h3, h4, .font-display {
     font-family: var(--font-display);
   }
