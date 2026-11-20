@@ -116,7 +116,9 @@ export function computeInhaledDose(input: DoseCalculationInput): {
 
     totalDose += hourDose;
     totalEffectiveConc += cInhaled;
-    if (i < 8) {
+    // Clock overnight hours: 22:00 to 06:00 (9 hours total)
+    const isNightHour = hIdx >= 22 || hIdx <= 6;
+    if (isNightHour) {
       overnightDose += hourDose;
     }
   }

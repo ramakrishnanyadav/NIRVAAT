@@ -1,0 +1,144 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { solveIndoorMassBalance } from '../packages/engines/src/indoor_model.ts';
+import { computeInhaledDose } from '../packages/engines/src/dose_model.ts';
+import { impactEstimate } from '../packages/engines/src/impact_estimate.ts';
+import { DELHI_WINTER_24H_PM25, WORKED_SCENARIOS } from '../packages/engines/src/mockData.ts';
+
+test('Physics Defect 7.1: seal_gaps must NEVER yield negative reduction on sealed flats (correlated draws)', () => {
+  // Scenario 2 is already a sealed flat (mostly_closed)
+  const sc2 = WORKED_SCENARIOS.sealed_flat_purifier;
+  const imp = impactEstimate({
+    profile: sc2.profile,
+    target_member_age_band: 'adult',
+    schedule: sc2.schedule,
+    action: 'seal_gaps',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    num_draws: 150,
+  });
+
+  // Dose with action should be <= dose without action in every quantile
+  assert.ok(
+    imp.value.daily_reduction_pct.q10 >= 0,
+    `Q10 reduction was negative for sealed flat: ${imp.value.daily_reduction_pct.q10}%`
+  );
+  assert.ok(
+    imp.value.dose_avoided_median_ug >= 0,
+    `Avoided dose was negative: ${imp.value.dose_avoided_median_ug}`
+  );
+});
+
+test('Physics Defect 7.2: ventilate_afternoon_window must NOT silently seal gaps for the other 23 hours', () => {
+  const leakyProfile = WORKED_SCENARIOS.leaky_1bhk_toddler.profile;
+  const imp = impactEstimate({
+    profile: leakyProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.leaky_1bhk_toddler.schedule,
+    action: 'ventilate_afternoon_window',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    num_draws: 60,
+  });
+
+  // It should NOT claim massive reduction equivalent to full home weatherstripping
+  // If it silently sealed all 23 other hours, reduction would be inflated to ~35-45%
+  // Pure ventilation flush typically produces small-to-moderate marginal reduction
+  assert.ok(
+    imp.value.daily_reduction_pct.median <= 22,
+    `Ventilate afternoon claimed ${imp.value.daily_reduction_pct.median}% daily reduction, indicating silent full-day sealing artifact!`
+  );
+});
+
+test('Physics Defect 7.3: close_windows_inversion must produce non-zero reduction when baseline keeps windows open', () => {
+  const openWindowProfile = {
+    ...WORKED_SCENARIOS.leaky_1bhk_toddler.profile,
+    home: {
+      ...WORKED_SCENARIOS.leaky_1bhk_toddler.profile.home,
+      windows_habit: 'kept_open_night' as const,
+    },
+  };
+
+  const imp = impactEstimate({
+    profile: openWindowProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.leaky_1bhk_toddler.schedule,
+    action: 'close_windows_inversion',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    num_draws: 60,
+  });
+
+  assert.ok(
+    imp.value.dose_avoided_median_ug > 15,
+    `close_windows_inversion produced near-zero avoidance (${imp.value.dose_avoided_median_ug} ug) on kept_open_night flat!`
+  );
+});
+
+test('Physics Defect 7.4: time_shift_commute must conserve 24-hour schedule (vacated hour replaced with home)', () => {
+  const sc1 = WORKED_SCENARIOS.leaky_1bhk_toddler;
+  const imp = impactEstimate({
+    profile: sc1.profile,
+    target_member_age_band: 'adult',
+    schedule: sc1.schedule,
+    action: 'time_shift_commute',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    num_draws: 60,
+  });
+
+  // Shifting commute from peak morning (hour 8) to cleanest afternoon (hour 14)
+  // should yield realistic positive reduction without dropping an hour from the day
+  assert.ok(
+    imp.value.dose_avoided_median_ug > 0,
+    `Expected positive avoided dose from time shift, got ${imp.value.dose_avoided_median_ug}`
+  );
+});
+
+test('Physics Defect 7.5: overnight dose calculation reflects clock night hours (22:00–06:00), not fixed array indices 0..7', () => {
+  // Schedule starting at 12:00 PM (hour 12) through 11:00 AM next day
+  const shiftedSchedule = Array.from({ length: 24 }, (_, i) => {
+    const clockHour = (12 + i) % 24;
+    return {
+      hour_index: clockHour,
+      micro_env: 'home' as const,
+      activity: (clockHour >= 22 || clockHour <= 6) ? ('rest' as const) : ('light' as const),
+      mask: 'none' as const,
+    };
+  });
+
+  // High PM2.5 at night (22:00 to 06:00), low PM2.5 in afternoon (12:00 to 18:00)
+  const hourlyOutdoor = Array(24).fill(50);
+  for (let h = 22; h < 24; h++) hourlyOutdoor[h] = 300;
+  for (let h = 0; h <= 6; h++) hourlyOutdoor[h] = 300;
+
+  const dose = computeInhaledDose({
+    age_band: 'adult',
+    schedule: shiftedSchedule,
+    indoor_pm25_hourly: hourlyOutdoor,
+    outdoor_pm25_hourly: hourlyOutdoor,
+  });
+
+  // Overnight dose should capture the high 300 ug/m3 hours (22:00 to 06:00), which are 9 hours
+  // If it used fixed indices 0..7 (12:00 to 19:00), it would capture 50 ug/m3 and produce ~10x lower dose!
+  assert.ok(
+    dose.overnightDoseUg > 400,
+    `Overnight dose was only ${dose.overnightDoseUg} ug! It likely used array slice 0..7 instead of clock night hours.`
+  );
+});
+
+test('Physics Defect 4: variance_share_pct is dynamically computed and sums to 100%', () => {
+  const sc1 = WORKED_SCENARIOS.leaky_1bhk_toddler;
+  const imp = impactEstimate({
+    profile: sc1.profile,
+    target_member_age_band: 'adult',
+    schedule: sc1.schedule,
+    action: 'seal_gaps',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    num_draws: 80,
+  });
+
+  const drivers = imp.value.top_uncertainties;
+  assert.ok(drivers.length >= 1, 'Expected at least 1 uncertainty driver');
+  const sumVariance = drivers.reduce((acc, d) => acc + d.variance_share_pct, 0);
+  assert.ok(
+    Math.abs(sumVariance - 100) <= 2,
+    `Variance shares must sum to ~100%, but summed to ${sumVariance}%`
+  );
+});

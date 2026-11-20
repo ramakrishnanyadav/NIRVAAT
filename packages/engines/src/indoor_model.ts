@@ -94,8 +94,13 @@ export function solveIndoorMassBalance(params: IndoorHourlyParams): {
   }
 
   const mean = hourly.reduce((a, b) => a + b, 0) / hourly.length;
-  // Overnight slice = indices 0..7 or last 8 hours if 24h
-  const overnightSlice = hourly.length >= 8 ? hourly.slice(0, 8) : hourly;
+  // Overnight clock slice (22:00 to 06:00) when 24h curve provided, otherwise first 8 hours
+  const overnightSlice =
+    hourly.length === 24
+      ? [hourly[22], hourly[23], ...hourly.slice(0, 7)]
+      : hourly.length >= 8
+        ? hourly.slice(0, 8)
+        : hourly;
   const overnightMean = overnightSlice.reduce((a, b) => a + b, 0) / overnightSlice.length;
   const peak = Math.max(...hourly);
 
