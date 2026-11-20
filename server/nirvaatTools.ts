@@ -192,6 +192,14 @@ const aqCache = new Map<string, CachedAQEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_AQ_CACHE_SIZE = 120;
 
+export function getAqCacheSize(): number {
+  return aqCache.size;
+}
+
+export function clearAqCache(): void {
+  aqCache.clear();
+}
+
 function pruneAqCache(): void {
   const now = Date.now();
   for (const [key, entry] of aqCache.entries()) {

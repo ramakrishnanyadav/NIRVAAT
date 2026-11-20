@@ -173,6 +173,14 @@ function getRoomVolumeM3(sizeBand: HouseholdProfile['home']['size_band']): numbe
 const impactCache = new Map<string, ToolEnvelope<ImpactEstimateValue>>();
 const MAX_IMPACT_CACHE_SIZE = 250;
 
+export function getImpactCacheSize(): number {
+  return impactCache.size;
+}
+
+export function clearImpactCache(): void {
+  impactCache.clear();
+}
+
 function computeImpactCacheKey(input: ImpactEstimateInput): string {
   const forecastSig = (input.forecast_pm25_hourly ?? []).slice(0, 12).join(',');
   const homeSig = `${input.profile?.home?.size_band}_${input.profile?.home?.windows_habit}_${input.profile?.home?.cooking_fuel}_${input.profile?.home?.purifier?.has}_${input.profile?.home?.purifier?.cadr_m3_hr ?? 0}_${Boolean((input.profile?.home as any)?.incense_or_dhoop)}`;
