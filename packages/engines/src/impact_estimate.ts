@@ -170,11 +170,30 @@ function getRoomVolumeM3(sizeBand: HouseholdProfile['home']['size_band']): numbe
   return 115;
 }
 
+const impactCache = new Map<string, ToolEnvelope<ImpactEstimateValue>>();
+const MAX_IMPACT_CACHE_SIZE = 250;
+
+function computeImpactCacheKey(input: ImpactEstimateInput): string {
+  const forecastSig = (input.forecast_pm25_hourly ?? []).slice(0, 12).join(',');
+  const homeSig = `${input.profile?.home?.size_band}_${input.profile?.home?.windows_habit}_${input.profile?.home?.cooking_fuel}_${input.profile?.home?.purifier?.has}_${input.profile?.home?.purifier?.cadr_m3_hr ?? 0}`;
+  return `${input.action}_${input.target_member_age_band}_${homeSig}_${input.schedule?.length ?? 0}_${forecastSig}_${input.seed ?? 42019}_${input.num_draws ?? 120}`;
+}
+
 export function impactEstimate(
   input: ImpactEstimateInput,
   callId = `imp_${input.action}`,
   asOf = new Date().toISOString()
 ): ToolEnvelope<ImpactEstimateValue> {
+  const cacheKey = computeImpactCacheKey(input);
+  const cached = impactCache.get(cacheKey);
+  if (cached) {
+    return {
+      ...cached,
+      call_id: callId,
+      as_of: asOf,
+    };
+  }
+
   const draws = Math.max(40, Math.min(300, input.num_draws ?? 120));
   const rng = createRng(input.seed ?? 42019);
   const volume = getRoomVolumeM3(input.profile.home.size_band);
@@ -577,7 +596,7 @@ export function impactEstimate(
     });
   }
 
-  return {
+  const envelope: ToolEnvelope<ImpactEstimateValue> = {
     call_id: callId,
     ok: true,
     value: {
@@ -623,4 +642,12 @@ export function impactEstimate(
     as_of: asOf,
     notes: `${topUncertainties[0]?.plain_note ?? ''} Single-zone PM2.5 estimate; not a clinical risk score.`,
   };
+
+  if (impactCache.size >= MAX_IMPACT_CACHE_SIZE) {
+    const oldestKey = impactCache.keys().next().value;
+    if (typeof oldestKey === 'string') impactCache.delete(oldestKey);
+  }
+  impactCache.set(cacheKey, envelope);
+
+  return envelope;
 }

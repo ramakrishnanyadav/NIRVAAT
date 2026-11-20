@@ -190,6 +190,21 @@ interface CachedAQEntry {
 
 const aqCache = new Map<string, CachedAQEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const MAX_AQ_CACHE_SIZE = 120;
+
+function pruneAqCache(): void {
+  const now = Date.now();
+  for (const [key, entry] of aqCache.entries()) {
+    if (now - entry.fetchedAtMs > CACHE_TTL_MS) {
+      aqCache.delete(key);
+    }
+  }
+  while (aqCache.size >= MAX_AQ_CACHE_SIZE) {
+    const oldestKey = aqCache.keys().next().value;
+    if (oldestKey) aqCache.delete(oldestKey);
+    else break;
+  }
+}
 
 export function roundCoarseCoord(coord: number): number {
   return Math.round(coord * 100) / 100;
@@ -357,6 +372,7 @@ export async function fetchLiveAirQualitySummary(
       peak_window: findWindow(hourlyForecast, 'max', 3),
     };
 
+    pruneAqCache();
     aqCache.set(gridId, { fetchedAtMs: Date.now(), summary });
     return { ok: true, data: summary };
   } catch (err) {
