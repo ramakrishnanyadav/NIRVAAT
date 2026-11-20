@@ -18,7 +18,7 @@ import {
   scoreAndRankActions,
   solveIndoorMassBalance,
 } from './packages/engines/src/index.ts';
-import { runNirvaatCopilot } from './server/nirvaatEngine.ts';
+import { auditDraftPlan, runNirvaatCopilot } from './server/nirvaatEngine.ts';
 import {
   GUIDANCE_LIBRARY,
   PRESET_REGIONS,
@@ -35,8 +35,49 @@ const PORT = Number(process.env.PORT ?? 3000);
 // 1. Top-level request deserialization mounted strictly before any route handlers
 app.use(express.json({ limit: '64kb' }));
 
-// In-memory store for saved decisions (session persistence with strict undefined-stripping)
-const savedDecisions: SavedDecisionRecord[] = [];
+// In-memory store for saved decisions with session isolation and rate limiting
+interface RateLimitBucket {
+  count: number;
+  resetAtMs: number;
+}
+const rateLimitMap = new Map<string, RateLimitBucket>();
+
+export function checkRateLimit(key: string, limit = 30, windowMs = 60_000): boolean {
+  const now = Date.now();
+  const bucket = rateLimitMap.get(key);
+  if (!bucket || now >= bucket.resetAtMs) {
+    rateLimitMap.set(key, { count: 1, resetAtMs: now + windowMs });
+    return true;
+  }
+  if (bucket.count >= limit) {
+    return false;
+  }
+  bucket.count++;
+  return true;
+}
+
+export function resetRateLimits(): void {
+  rateLimitMap.clear();
+}
+
+// Session-scoped storage for saved decisions (max 25 per session, bounded session map)
+const sessionHistory = new Map<string, SavedDecisionRecord[]>();
+
+export function getSessionHistoryMap(): Map<string, SavedDecisionRecord[]> {
+  return sessionHistory;
+}
+
+function getSessionId(req: Request): string {
+  const header = req.headers['x-nirvaat-session'];
+  if (typeof header === 'string' && header.trim().length > 0) {
+    return header.trim().slice(0, 64);
+  }
+  const query = req.query.session_id;
+  if (typeof query === 'string' && query.trim().length > 0) {
+    return query.trim().slice(0, 64);
+  }
+  return 'default';
+}
 
 const SaveHistorySchema = z.object({
   id: z.string().trim().min(1).max(64).optional(),
@@ -174,18 +215,48 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
   const rt = stripUndefinedDeep(parsed.data.runtime);
   const lat = roundCoarseCoord(rt.region.latitude);
   const lon = roundCoarseCoord(rt.region.longitude);
+  
+  const t0 = performance.now();
   const aqRes = await fetchLiveAirQualitySummary(
     { ...rt.region, latitude: lat, longitude: lon, grid_id: `${lat.toFixed(2)}_${lon.toFixed(2)}` },
     rt.max_data_age_min,
     rt.simulated_degradation ?? 'none'
   );
+  const aqDurationMs = Math.max(1, Math.round(performance.now() - t0));
 
-  const forecastHourly: number[] =
-    aqRes.ok && aqRes.data.hourly_forecast.length >= 12
-      ? aqRes.data.hourly_forecast.map((p) => p.pm2_5 ?? 120)
-      : DELHI_WINTER_24H_PM25;
+  let startHour = 0;
+  let hasImputation = false;
+  let forecastHourly: number[] = [];
 
-  const isLive = aqRes.ok && (rt.simulated_degradation ?? 'none') === 'none';
+  if (aqRes.ok && aqRes.data.hourly_forecast && aqRes.data.hourly_forecast.length >= 12) {
+    if (aqRes.data.hourly_forecast[0]?.time) {
+      const parsedHour = parseInt(aqRes.data.hourly_forecast[0].time.split('T')[1]?.split(':')[0] ?? '', 10);
+      if (!Number.isNaN(parsedHour)) {
+        startHour = parsedHour;
+      }
+    }
+    forecastHourly = aqRes.data.hourly_forecast.map((p) => {
+      if (typeof p.pm2_5 === 'number') {
+        return p.pm2_5;
+      }
+      hasImputation = true;
+      return aqRes.data.pm2_5 ?? 120;
+    });
+  } else {
+    forecastHourly = DELHI_WINTER_24H_PM25;
+    hasImputation = true;
+  }
+
+  const isSimulatedDegradation = (rt.simulated_degradation ?? 'none') !== 'none';
+  const isUsingFallback = !aqRes.ok || !aqRes.data.hourly_forecast || aqRes.data.hourly_forecast.length < 12;
+  const dataStatus: 'tier_A' | 'tier_B' | 'tier_C' =
+    isSimulatedDegradation || isUsingFallback
+      ? 'tier_C'
+      : hasImputation
+        ? 'tier_B'
+        : 'tier_A';
+
+  const isLive = dataStatus === 'tier_A';
   const engineProfile = {
     ...rt.profile,
     home: {
@@ -198,13 +269,14 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
     },
   };
 
-  const baseSchedule = Array.from({ length: 24 }, (_, h) => {
-    if (rt.profile.constraints.outdoor_work && h >= 9 && h <= 14) {
-      return { hour_index: h, micro_env: 'outdoors' as const, activity: 'moderate' as const, mask: 'none' as const };
+  const baseSchedule = Array.from({ length: forecastHourly.length }, (_, i) => {
+    const clockHour = (startHour + i) % 24;
+    if (rt.profile.constraints.outdoor_work && clockHour >= 9 && clockHour <= 14) {
+      return { hour_index: clockHour, micro_env: 'outdoors' as const, activity: 'moderate' as const, mask: 'none' as const };
     }
-    if (h === 8 || h === 18) {
+    if (clockHour === 8 || clockHour === 18) {
       return {
-        hour_index: h,
+        hour_index: clockHour,
         micro_env: 'commute' as const,
         activity: 'light' as const,
         mask: 'none' as const,
@@ -212,13 +284,14 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
       };
     }
     return {
-      hour_index: h,
+      hour_index: clockHour,
       micro_env: 'home' as const,
-      activity: h >= 22 || h <= 6 ? ('rest' as const) : ('light' as const),
+      activity: clockHour >= 22 || clockHour <= 6 ? ('rest' as const) : ('light' as const),
       mask: 'none' as const,
     };
   });
 
+  const t1 = performance.now();
   const scoredEnv = scoreAndRankActions(
     engineProfile,
     baseSchedule,
@@ -226,6 +299,7 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
     undefined,
     `score_${Date.now().toString(36)}`
   );
+  const scoreDurationMs = Math.max(1, Math.round(performance.now() - t1));
 
   const isHindi = rt.locale.toLowerCase().startsWith('hi');
   const priorityMember = pickPriorityMember(engineProfile);
@@ -247,17 +321,21 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
   const plan = {
     language: isHindi ? 'hi-IN' : 'en-IN',
     mode: 'plan' as const,
-    data_status: isLive ? ('tier_A' as const) : ('tier_C' as const),
+    data_status: dataStatus,
     situation: {
       summary: isLive
         ? isHindi
           ? `${rt.region.neighborhood} में वर्तमान PM2.5 ${currentPm} µg/m³ है। सबसे साफ समय ${cleanestLabel} रहेगा।`
           : `Current grid PM2.5 is ${currentPm} µg/m³ in ${rt.region.neighborhood}; cleanest dispersion window is ${cleanestLabel}.`
-        : isHindi
-          ? `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${rt.region.official_source} देखें।`
-          : `General guidance, no live data. Check ${rt.region.official_source} for live readings.`,
-      confidence: isLive ? ('medium' as const) : ('low' as const),
-      sources: isLive
+        : hasImputation && !isUsingFallback
+          ? isHindi
+            ? `${rt.region.neighborhood} में लाइव डेटा में कुछ अनुमानित मान शामिल हैं (वर्तमान PM2.5: ${currentPm} µg/m³)।`
+            : `Live grid feed with partial hour interpolation for ${rt.region.neighborhood} (Current PM2.5: ${currentPm} µg/m³).`
+          : isHindi
+            ? `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${rt.region.official_source} देखें।`
+            : `General guidance, fallback reference data. Check ${rt.region.official_source} for live readings.`,
+      confidence: dataStatus === 'tier_A' ? ('high' as const) : dataStatus === 'tier_B' ? ('medium' as const) : ('low' as const),
+      sources: isLive && aqRes.ok
         ? [aqRes.data.source, scoredEnv.source]
         : [rt.region.official_source, scoredEnv.source],
       as_of: aqRes.ok ? aqRes.data.as_of : new Date().toISOString(),
@@ -275,9 +353,9 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
       why_it_works: item.top_uncertainty || 'Lowers inhaled PM2.5 concentration during highest-dose hours.',
       effect: {
         metric: '24h inhaled PM2.5 dose',
-        with: isLive ? `${item.daily_with_ug.q10}–${item.daily_with_ug.q90} µg/day` : null,
-        without: isLive ? `${item.daily_without_ug.q10}–${item.daily_without_ug.q90} µg/day` : null,
-        change_range: isLive
+        with: isLive || dataStatus === 'tier_B' ? `${item.daily_with_ug.q10}–${item.daily_with_ug.q90} µg/day` : null,
+        without: isLive || dataStatus === 'tier_B' ? `${item.daily_without_ug.q10}–${item.daily_without_ug.q90} µg/day` : null,
+        change_range: isLive || dataStatus === 'tier_B'
           ? `-${item.daily_reduction_pct.q10}% to -${item.daily_reduction_pct.q90}%`
           : item.dose_avoided_ug > 150
             ? 'large'
@@ -318,11 +396,11 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
             confidence: aqRes.data.confidence,
             source: aqRes.data.source,
             as_of: aqRes.data.as_of,
-            notes: 'Live Open-Meteo grid feed',
+            notes: isLive ? 'Live Open-Meteo grid feed' : hasImputation ? 'Partially imputed grid feed' : 'Fallback seasonal reference',
           }
         : { ok: false, error: aqRes.error },
       status: aqRes.ok ? ('ok' as const) : ('failed' as const),
-      duration_ms: 12,
+      duration_ms: aqDurationMs,
       timestamp: new Date().toISOString(),
     },
     {
@@ -331,16 +409,24 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
       args: { priority_member: priorityMember.label, preset_count: scoredEnv.value.top_actions.length },
       result: scoredEnv as unknown as Record<string, unknown>,
       status: 'ok' as const,
-      duration_ms: 18,
+      duration_ms: scoreDurationMs,
       timestamp: new Date().toISOString(),
     },
   ];
+
+  // Perform rigorous verifier audit on the generated deterministic plan
+  const audit = auditDraftPlan(
+    plan as any,
+    traces as any,
+    `Deterministic engine plan for ${priorityMember.label}`,
+    rt
+  );
 
   res.json(
     stripUndefinedDeep({
       plan,
       tool_traces: traces,
-      audit: { pass: true, violations: [] },
+      audit,
       model_used: 'nirvaat-deterministic-engines-v1',
       created_at: new Date().toISOString(),
       worked_presets: Object.values(WORKED_SCENARIOS).map((w) => ({ id: w.id, label: w.label })),
@@ -427,11 +513,24 @@ app.post('/api/engines/simulate', (req: Request, res: Response) => {
   });
 });
 
-app.get('/api/history', (_req: Request, res: Response) => {
-  res.json({ items: savedDecisions });
+app.get('/api/history', (req: Request, res: Response) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(`hist_get_${clientIp}`, 60, 60_000)) {
+    res.status(429).json({ error: 'Rate limit exceeded for history queries.' });
+    return;
+  }
+  const sessionId = getSessionId(req);
+  const items = sessionHistory.get(sessionId) ?? [];
+  res.json({ items });
 });
 
 app.post('/api/history', (req: Request, res: Response) => {
+  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(`hist_post_${clientIp}`, 30, 60_000)) {
+    res.status(429).json({ error: 'Rate limit exceeded for history saves.' });
+    return;
+  }
+
   const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
   const parsed = SaveHistorySchema.safeParse(rawBody);
   if (!parsed.success) {
@@ -453,29 +552,46 @@ app.post('/api/history', (req: Request, res: Response) => {
     created_at: parsed.data.created_at ?? new Date().toISOString(),
   }) as unknown as SavedDecisionRecord;
 
-  const existingIdx = savedDecisions.findIndex((d) => d.id === sanitized.id);
+  const sessionId = getSessionId(req);
+  let records = sessionHistory.get(sessionId);
+  if (!records) {
+    records = [];
+    if (sessionHistory.size >= 200) {
+      const firstKey = sessionHistory.keys().next().value;
+      if (firstKey) sessionHistory.delete(firstKey);
+    }
+    sessionHistory.set(sessionId, records);
+  }
+
+  const existingIdx = records.findIndex((d) => d.id === sanitized.id);
   if (existingIdx >= 0) {
-    savedDecisions[existingIdx] = sanitized;
+    records[existingIdx] = sanitized;
   } else {
-    savedDecisions.unshift(sanitized);
-    if (savedDecisions.length > 25) savedDecisions.pop();
+    records.unshift(sanitized);
+    if (records.length > 25) records.pop();
   }
 
   res.status(201).json({ saved: true, record: sanitized });
 });
 
 app.delete('/api/history/:id', (req: Request, res: Response) => {
+  const sessionId = getSessionId(req);
+  const records = sessionHistory.get(sessionId);
+  if (!records) {
+    res.status(404).json({ error: 'Saved decision not found.' });
+    return;
+  }
   const id = String(req.params.id ?? '');
-  const idx = savedDecisions.findIndex((d) => d.id === id);
+  const idx = records.findIndex((d) => d.id === id);
   if (idx === -1) {
     res.status(404).json({ error: 'Saved decision not found.' });
     return;
   }
-  savedDecisions.splice(idx, 1);
+  records.splice(idx, 1);
   res.json({ deleted: true, id });
 });
 
-async function startServer() {
+export async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
@@ -491,9 +607,14 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  return app.listen(PORT, '0.0.0.0', () => {
     console.log(`NIRVAAT server listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-startServer();
+export { app };
+
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain && process.env.NODE_ENV !== 'test') {
+  startServer();
+}
