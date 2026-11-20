@@ -26,7 +26,15 @@ jobs:
       - name: Static Analysis & TypeScript Typecheck
         run: npm run lint
 
-      - name: Run Test Pyramid (Physics, Verifier, Regressions, Red-Flag, API, A11y Axe)
+      - name: Dependency Vulnerability Audit
+        run: npm audit --audit-level=high
+
+      - name: Secret Scan (Gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Test Pyramid (Physics, Verifier, Regressions, Red-Flag, API, A11y Axe, Security)
         run: npm test
 
       - name: Glass Contrast & Color Ratio Audit

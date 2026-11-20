@@ -19,7 +19,7 @@ export const HouseholdMemberSchema = z.object({
   label: z.string().trim().min(1).max(40),
   age_band: z.enum(['infant_under_2', 'child_2_12', 'teen', 'adult', 'older_adult_65_plus']),
   conditions: z.array(z.string().trim().max(40)).max(6),
-});
+}).strict();
 
 export type HouseholdMember = z.infer<typeof HouseholdMemberSchema>;
 
@@ -35,21 +35,22 @@ export const HouseholdProfileSchema = z.object({
       has: z.boolean(),
       type: z.enum(['none', 'hepa', 'diy_cr_box']).optional(),
       cadr: z.number().min(0).max(1500).optional(),
-    }),
+      cadr_m3_hr: z.number().min(0).max(1500).optional(),
+    }).strict(),
     masks: z.array(z.enum(['none', 'cloth_surgical', 'n95_kn95_kf94', 'valved_n95'])).max(4),
     incense_or_dhoop: z.boolean().optional(),
-  }),
+  }).strict(),
   commute: z.object({
     mode: z.enum(['walking', 'two_wheeler', 'public_transit', 'car', 'work_from_home']),
     window: z.string().trim().max(40),
-  }),
+  }).strict(),
   constraints: z.object({
     budget_band: z.enum(['free_only', 'low_cost', 'moderate']),
     renter: z.boolean(),
     outdoor_work: z.boolean(),
-  }),
+  }).strict(),
   languages: z.array(z.string().trim().max(16)).min(1).max(4),
-});
+}).strict();
 
 export type HouseholdProfile = z.infer<typeof HouseholdProfileSchema>;
 
@@ -62,7 +63,7 @@ export const RegionConfigSchema = z.object({
   emergency_number: z.string().trim().min(2).max(16),
   official_source: z.string().trim().min(1).max(80),
   active_policy: z.string().trim().max(120),
-});
+}).strict();
 
 export type RegionConfig = z.infer<typeof RegionConfigSchema>;
 
@@ -70,7 +71,7 @@ export const SessionMemorySchema = z.object({
   last_plan_summary: z.string().max(300).nullable(),
   user_feedback: z.string().max(300).nullable(),
   unresolved_question: z.string().max(200).nullable(),
-});
+}).strict();
 
 export type SessionMemory = z.infer<typeof SessionMemorySchema>;
 
@@ -82,16 +83,60 @@ export const RuntimeContextSchema = z.object({
   profile: HouseholdProfileSchema,
   session_memory: SessionMemorySchema,
   simulated_degradation: z.enum(['none', 'no_impact', 'no_aq', 'all_down']).optional(),
-});
+}).strict();
 
 export type RuntimeContext = z.infer<typeof RuntimeContextSchema>;
 
 export const PlanRequestSchema = z.object({
   query: z.string().trim().min(1).max(1200),
   runtime: RuntimeContextSchema,
-});
+}).strict();
 
 export type PlanRequest = z.infer<typeof PlanRequestSchema>;
+
+export const ActionEffectSchema = z.object({
+  metric: z.string(),
+  with: z.string().nullable().optional(),
+  without: z.string().nullable().optional(),
+  change_range: z.string(),
+  confidence: z.enum(['high', 'medium', 'low']),
+  tool_ref: z.string(),
+}).strict();
+
+export const PlanActionSchema = z.object({
+  rank: z.number().int().min(1).max(10),
+  title: z.string().min(1),
+  when: z.string(),
+  how: z.string(),
+  why_it_works: z.string(),
+  effect: ActionEffectSchema,
+  cost: z.enum(['free', 'low', 'medium', 'high']),
+  evidence: z.enum(['strong', 'moderate', 'emerging']),
+  protects: z.array(z.string()),
+}).strict();
+
+export const NirvaatPlanResponseSchema = z.object({
+  language: z.string(),
+  mode: z.enum(['plan', 'answer', 'clarify', 'emergency', 'out_of_scope']),
+  data_status: z.enum(['tier_A', 'tier_B', 'tier_C', 'tier_D']),
+  situation: z.object({
+    summary: z.string(),
+    confidence: z.enum(['high', 'medium', 'low']),
+    sources: z.array(z.string()),
+    as_of: z.string(),
+  }).strict(),
+  assumptions: z.array(z.string()),
+  actions: z.array(PlanActionSchema),
+  if_you_can_do_more: z.array(z.string()).optional(),
+  myth_correction: z.string().optional(),
+  clarifying_question: z.string().optional(),
+  emergency: z.object({
+    message: z.string(),
+    number: z.string(),
+  }).strict().optional(),
+  safety_note: z.string().optional(),
+  follow_up_hook: z.string(),
+}).strict();
 
 export interface ActionEffect {
   metric: string;

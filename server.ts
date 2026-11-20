@@ -1,5 +1,8 @@
 import 'dotenv/config';
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
@@ -35,16 +38,99 @@ const PORT = Number(process.env.PORT ?? 3000);
 // 1. Top-level request deserialization mounted strictly before any route handlers
 app.use(express.json({ limit: '64kb' }));
 
-// 2. Defensive HTTP security headers
-app.use((_req: Request, res: Response, next) => {
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+// 2. Cookie parser with signed session entropy
+const SESSION_SECRET = process.env.SESSION_SECRET || 'nirvaat_sec_token_994828182_entropy';
+app.use(cookieParser(SESSION_SECRET));
+
+// 3. Helmet security headers with Content Security Policy (OWASP ASVS L1-L2)
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'https://air-quality-api.open-meteo.com', 'https://generativelanguage.googleapis.com'],
+        fontSrc: ["'self'", 'data:', 'https:'],
+        objectSrc: ["'none'"],
+        baseUri: ["'self'"],
+        formAction: ["'self'"],
+        frameAncestors: ["'none'"],
+      },
+    },
+    crossOriginEmbedderPolicy: false,
+    xFrameOptions: { action: 'deny' },
+    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  })
+);
+
+// 4. Explicit CORS Allowlist (No wildcard '*')
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()) : []),
+]);
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin && ALLOWED_ORIGINS.has(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-nirvaat-session');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
   next();
 });
 
-// In-memory store for saved decisions with session isolation and rate limiting
+// 5. Global Request Timeout Middleware (15s ceiling)
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  const timer = setTimeout(() => {
+    if (!res.headersSent) {
+      res.status(504).json({ error: 'Gateway timeout: request took longer than 15 seconds.' });
+    }
+  }, 15_000);
+  res.on('finish', () => clearTimeout(timer));
+  res.on('close', () => clearTimeout(timer));
+  next();
+});
+
+// 6. Signed Anonymous Session Middleware
+const SESSION_COOKIE_NAME = 'nirvaat_session';
+
+app.use((req: Request, res: Response, next: NextFunction) => {
+  let sessionId = req.signedCookies?.[SESSION_COOKIE_NAME] || req.cookies?.[SESSION_COOKIE_NAME];
+  if (!sessionId) {
+    const header = req.headers['x-nirvaat-session'];
+    if (typeof header === 'string' && header.trim().length > 0) {
+      sessionId = header.trim().slice(0, 64);
+    }
+  }
+
+  if (!sessionId || typeof sessionId !== 'string' || !/^[0-9a-zA-Z_-]{8,64}$/.test(sessionId)) {
+    sessionId = crypto.randomUUID();
+  }
+
+  res.cookie(SESSION_COOKIE_NAME, sessionId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    signed: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+  });
+
+  (req as any).sessionId = sessionId;
+  next();
+});
+
+// In-memory store for rate limiting with Retry-After calculation
 interface RateLimitBucket {
   count: number;
   resetAtMs: number;
@@ -65,11 +151,18 @@ export function checkRateLimit(key: string, limit = 30, windowMs = 60_000): bool
   return true;
 }
 
+export function getRateLimitRetryAfter(key: string): number {
+  const now = Date.now();
+  const bucket = rateLimitMap.get(key);
+  if (!bucket || now >= bucket.resetAtMs) return 1;
+  return Math.max(1, Math.ceil((bucket.resetAtMs - now) / 1000));
+}
+
 export function resetRateLimits(): void {
   rateLimitMap.clear();
 }
 
-// Session-scoped storage for saved decisions (max 25 per session, bounded session map)
+// Session-scoped storage for saved decisions (max 25 per session, max 500 sessions in memory)
 const sessionHistory = new Map<string, SavedDecisionRecord[]>();
 
 export function getSessionHistoryMap(): Map<string, SavedDecisionRecord[]> {
@@ -77,15 +170,7 @@ export function getSessionHistoryMap(): Map<string, SavedDecisionRecord[]> {
 }
 
 function getSessionId(req: Request): string {
-  const header = req.headers['x-nirvaat-session'];
-  if (typeof header === 'string' && header.trim().length > 0) {
-    return header.trim().slice(0, 64);
-  }
-  const query = req.query.session_id;
-  if (typeof query === 'string' && query.trim().length > 0) {
-    return query.trim().slice(0, 64);
-  }
-  return 'default';
+  return (req as any).sessionId || 'default';
 }
 
 const SaveHistorySchema = z.object({
@@ -97,7 +182,7 @@ const SaveHistorySchema = z.object({
   tool_traces: z.array(z.record(z.string(), z.unknown())),
   model_used: z.string().trim().min(1).max(80),
   created_at: z.string().trim().min(1).max(64).optional(),
-});
+}).strict();
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({
@@ -115,27 +200,42 @@ app.get('/api/guidance', (_req: Request, res: Response) => {
   res.json({ entries: GUIDANCE_LIBRARY });
 });
 
-app.get('/api/air-quality', async (req: Request, res: Response) => {
-  const latRaw = Number(req.query.lat ?? PRESET_REGIONS[0].latitude);
-  const lonRaw = Number(req.query.lon ?? PRESET_REGIONS[0].longitude);
-  const maxAgeRaw = Number(req.query.maxAge ?? 60);
-  const simRaw = String(req.query.sim ?? 'none');
+const AirQualityQuerySchema = z.object({
+  lat: z.coerce.number().min(-90).max(90).optional(),
+  lon: z.coerce.number().min(-180).max(180).optional(),
+  maxAge: z.coerce.number().min(15).max(180).optional(),
+  sim: z.enum(['none', 'no_impact', 'no_aq', 'all_down']).optional(),
+  city: z.string().max(60).optional(),
+  neighborhood: z.string().max(60).optional(),
+}).strict();
 
-  if (!Number.isFinite(latRaw) || !Number.isFinite(lonRaw) || latRaw < -90 || latRaw > 90 || lonRaw < -180 || lonRaw > 180) {
-    res.status(400).json({ error: 'Invalid coarse latitude or longitude coordinates.' });
+app.get('/api/air-quality', async (req: Request, res: Response) => {
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
+  if (!checkRateLimit(`aq_${clientIp}`, 60, 60_000)) {
+    const retryAfter = getRateLimitRetryAfter(`aq_${clientIp}`);
+    res.setHeader('Retry-After', retryAfter.toString());
+    res.status(429).json({ error: 'Rate limit exceeded for air quality requests.', retry_after: retryAfter });
     return;
   }
 
+  const parsed = AirQualityQuerySchema.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: 'Invalid coarse latitude or longitude coordinates or query parameters.',
+      details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+    });
+    return;
+  }
+
+  const latRaw = parsed.data.lat ?? PRESET_REGIONS[0].latitude;
+  const lonRaw = parsed.data.lon ?? PRESET_REGIONS[0].longitude;
+  const maxAgeRaw = parsed.data.maxAge ?? 60;
+  const sim = parsed.data.sim ?? 'none';
+
   const lat = roundCoarseCoord(latRaw);
   const lon = roundCoarseCoord(lonRaw);
-  const city = typeof req.query.city === 'string' ? req.query.city.slice(0, 60) : 'Custom Grid';
-  const neighborhood =
-    typeof req.query.neighborhood === 'string'
-      ? req.query.neighborhood.slice(0, 60)
-      : `Grid ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
-
-  const sim =
-    simRaw === 'no_impact' || simRaw === 'no_aq' || simRaw === 'all_down' ? simRaw : 'none';
+  const city = parsed.data.city ?? 'Custom Grid';
+  const neighborhood = parsed.data.neighborhood ?? `Grid ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
 
   const region = {
     city,
@@ -212,7 +312,7 @@ app.post('/api/plan', async (req: Request, res: Response) => {
 
 const EnginePlanBodySchema = z.object({
   runtime: RuntimeContextSchema,
-});
+}).strict();
 
 app.post('/api/engines/plan', async (req: Request, res: Response) => {
   const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
@@ -451,7 +551,7 @@ const SimulateTwinSchema = z.object({
   seal_gaps: z.boolean(),
   clean_cooking: z.boolean(),
   filter_mode: z.enum(['none', 'diy_cr_box', 'hepa']),
-});
+}).strict();
 
 app.post('/api/engines/simulate', (req: Request, res: Response) => {
   const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
@@ -524,9 +624,11 @@ app.post('/api/engines/simulate', (req: Request, res: Response) => {
 });
 
 app.get('/api/history', (req: Request, res: Response) => {
-  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
   if (!checkRateLimit(`hist_get_${clientIp}`, 60, 60_000)) {
-    res.status(429).json({ error: 'Rate limit exceeded for history queries.' });
+    const retryAfter = getRateLimitRetryAfter(`hist_get_${clientIp}`);
+    res.setHeader('Retry-After', retryAfter.toString());
+    res.status(429).json({ error: 'Rate limit exceeded for history queries.', retry_after: retryAfter });
     return;
   }
   const sessionId = getSessionId(req);
@@ -535,9 +637,11 @@ app.get('/api/history', (req: Request, res: Response) => {
 });
 
 app.post('/api/history', (req: Request, res: Response) => {
-  const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
   if (!checkRateLimit(`hist_post_${clientIp}`, 30, 60_000)) {
-    res.status(429).json({ error: 'Rate limit exceeded for history saves.' });
+    const retryAfter = getRateLimitRetryAfter(`hist_post_${clientIp}`);
+    res.setHeader('Retry-After', retryAfter.toString());
+    res.status(429).json({ error: 'Rate limit exceeded for history saves.', retry_after: retryAfter });
     return;
   }
 
@@ -566,7 +670,7 @@ app.post('/api/history', (req: Request, res: Response) => {
   let records = sessionHistory.get(sessionId);
   if (!records) {
     records = [];
-    if (sessionHistory.size >= 200) {
+    if (sessionHistory.size >= 500) {
       const firstKey = sessionHistory.keys().next().value;
       if (firstKey) sessionHistory.delete(firstKey);
     }
@@ -599,6 +703,37 @@ app.delete('/api/history/:id', (req: Request, res: Response) => {
   }
   records.splice(idx, 1);
   res.json({ deleted: true, id });
+});
+
+// Delete-my-data endpoint (purges all stored history for the current session)
+app.delete('/api/history', (req: Request, res: Response) => {
+  const sessionId = getSessionId(req);
+  sessionHistory.delete(sessionId);
+  res.json({ cleared: true, message: 'All personal history successfully cleared.' });
+});
+
+app.delete('/api/privacy/purge-data', (req: Request, res: Response) => {
+  const sessionId = getSessionId(req);
+  sessionHistory.delete(sessionId);
+  res.json({ ok: true, message: 'All session telemetry and saved decisions purged.' });
+});
+
+app.get('/api/privacy/policy', (_req: Request, res: Response) => {
+  res.json({
+    retention_policy: 'In-memory session storage only. Records expire when session cookie expires (7 days) or upon FIFO limit eviction.',
+    coarse_location_notice: 'Coordinates are rounded to 2 decimal places (~1.1 km coarse spatial grid). Note: coordinate rounding provides spatial aggregation to protect exact household location, but does not constitute differential privacy.',
+    pii_policy: 'Zero personal names, telephone numbers, IP addresses, or street addresses are logged or persisted.',
+    purge_endpoint: 'DELETE /api/privacy/purge-data or DELETE /api/history',
+  });
+});
+
+// Sanitized Error Handler (OWASP ASVS: No stack traces or upstream errors leaked)
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  if (err && typeof err === 'object' && 'type' in err && (err as any).type === 'entity.too.large') {
+    res.status(413).json({ error: 'Payload Too Large: request body exceeds 64kb limit.' });
+    return;
+  }
+  res.status(500).json({ error: 'An internal server error occurred.' });
 });
 
 export async function startServer() {

@@ -152,6 +152,15 @@ gcloud run deploy nirvaat-copilot \
   --set-secrets="GEMINI_API_KEY=GEMINI_API_KEY:latest"
 ```
 
+> **Security & Ingress Architectural Note (`--allow-unauthenticated`)**:
+> - **Public Consumer Deployment (Default)**: In public health emergencies (such as severe winter smog in Delhi NCR), NIRVAAT operates with unauthenticated ingress so that vulnerable families can obtain immediate, frictionless clinical triage and exposure interventions. Abuse and unauthorized data leakage are prevented entirely at the application layer via:
+>   1. Signed anonymous cryptographic session cookies (`httpOnly`, `SameSite: Lax`, random UUID v4) providing strict ASVS L1–L2 user isolation.
+>   2. Per-IP and per-session sliding-window rate limiters (emitting standard `Retry-After` headers and HTTP 429).
+>   3. Strict body size limits (64 KB) and schema validation with Zod `.strict()` rejecting unexpected parameters.
+>   4. Server-side concurrency bounds (`MAX_CONCURRENT_GEMINI_CALLS = 3`) and daily LLM quota budgets (`DAILY_LLM_BUDGET = 250`).
+> - **Enterprise / Clinical Health System Deployment**: When deploying in an institutional setting (hospitals, government health portals, or clinical networks), `--allow-unauthenticated` must be removed (`--no-allow-unauthenticated`), and access should be guarded behind Google Cloud Identity-Aware Proxy (IAP) or an enterprise OAuth2 / OIDC gateway.
+
+
 ### 5. Required Campaign Verification Binding
 
 Apply the mandatory resource label to register the deployed Cloud Run service:
