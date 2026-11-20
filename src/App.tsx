@@ -1,12 +1,9 @@
 import {
   AlertCircle,
   ArrowRight,
-  Compass,
   Loader2,
-  MapPin,
   RefreshCw,
   Save,
-  Search,
   ShieldAlert,
   Undo2,
 } from 'lucide-react';
@@ -15,11 +12,13 @@ import { AuditAndSettingsView } from './components/AuditAndSettingsView';
 import { BreathOrb } from './components/BreathOrb';
 import { CommandItem, CommandPalette } from './components/CommandPalette';
 import { EmergencyView } from './components/EmergencyView';
-import { ExposureRing } from './components/ExposureRing';
 import { HouseholdTwin } from './components/HouseholdTwin';
 import { InversionTimeline } from './components/InversionTimeline';
 import { LearnView } from './components/LearnView';
+import { PlanQueryBar } from './components/PlanQueryBar';
 import { PlanRenderer } from './components/PlanRenderer';
+import { TodayBento } from './components/TodayBento';
+import { WorkspaceToolbar } from './components/WorkspaceToolbar';
 import { STRINGS, UiLang } from './i18n/strings';
 import {
   AirQualitySummary,
@@ -675,114 +674,21 @@ export default function App() {
 
       {/* Workspace Context Toolbar (Below Top Bar) */}
       {route !== 'emergency' && (
-        <div className="border-b border-slate-200/70 bg-white/60">
-          <div className="mx-auto flex max-w-[1280px] flex-wrap items-center justify-between gap-3 px-4 py-2.5 sm:px-6 text-xs">
-            <div className="flex flex-wrap items-center gap-2">
-              <label htmlFor="region-select" className="sr-only">
-                Select neighborhood grid
-              </label>
-              <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5">
-                <MapPin className="h-3.5 w-3.5 text-teal-700 shrink-0" aria-hidden="true" />
-                <select
-                  id="region-select"
-                  value={selectedRegion.grid_id}
-                  onChange={(e) => {
-                    const found = regions.find((r) => r.grid_id === e.target.value);
-                    if (found) setSelectedRegion(found);
-                  }}
-                  className="bg-transparent font-medium text-slate-900 focus:outline-none"
-                >
-                  {regions.map((r) => (
-                    <option key={r.grid_id} value={r.grid_id}>
-                      {r.city} · {r.neighborhood}
-                    </option>
-                  ))}
-                  {!regions.some((r) => r.grid_id === selectedRegion.grid_id) && (
-                    <option value={selectedRegion.grid_id}>
-                      {selectedRegion.city} · {selectedRegion.neighborhood}
-                    </option>
-                  )}
-                </select>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleUseBrowserGeolocation}
-                disabled={geoLoading}
-                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0"
-              >
-                <Compass className="h-3.5 w-3.5 text-teal-700" aria-hidden="true" />
-                <span>{geoLoading ? 'Locating grid…' : 'Use Coarse Location'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={loadAirQuality}
-                disabled={aqLoading}
-                aria-label="Refresh live air quality"
-                className="inline-flex min-h-[34px] items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-slate-600 hover:bg-slate-50"
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${aqLoading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Channel selector */}
-              <div
-                role="group"
-                aria-label="Output channel format"
-                className="flex items-center gap-0.5 rounded-xl bg-slate-200/75 p-0.5"
-              >
-                {(['APP', 'WHATSAPP', 'SMS', 'VOICE'] as const).map((ch) => (
-                  <button
-                    key={ch}
-                    type="button"
-                    onClick={() => setChannel(ch)}
-                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 ${
-                      channel === ch ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    {ch}
-                  </button>
-                ))}
-              </div>
-
-              {/* Language toggle */}
-              <div className="flex items-center gap-0.5 rounded-xl bg-slate-200/75 p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setLang('en')}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
-                    lang === 'en' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                  }`}
-                >
-                  EN
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLang('hi')}
-                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold ${
-                    lang === 'hi' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                  }`}
-                >
-                  हिन्दी
-                </button>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => setCmdOpen(true)}
-                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-medium text-slate-700 hover:bg-slate-50 whitespace-nowrap shrink-0"
-              >
-                <Search className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>{strings.actions.commandPalette}</span>
-                <kbd className="hidden sm:inline rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-500">
-                  ⌘K
-                </kbd>
-              </button>
-            </div>
-          </div>
-        </div>
+        <WorkspaceToolbar
+          regions={regions}
+          selectedRegion={selectedRegion}
+          onSelectRegion={setSelectedRegion}
+          onUseBrowserGeolocation={handleUseBrowserGeolocation}
+          geoLoading={geoLoading}
+          onRefreshAirQuality={loadAirQuality}
+          aqLoading={aqLoading}
+          channel={channel}
+          onChangeChannel={setChannel}
+          lang={lang}
+          onChangeLang={setLang}
+          onOpenCmd={() => setCmdOpen(true)}
+          strings={strings}
+        />
       )}
 
       {/* Main Content Viewport */}
@@ -930,176 +836,39 @@ export default function App() {
           /* TODAY FLAGSHIP WORKSPACE */
           <div className="space-y-6">
             {/* Top Bento: Headline + Breath Orb + Exposure Ring */}
-            <section className="grid gap-4 lg:grid-cols-12 items-stretch">
-              <div className="aurora-surface rounded-2xl p-6 lg:col-span-5 flex flex-col justify-between space-y-4">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-teal-800">
-                    {selectedRegion.city} · {selectedRegion.neighborhood} · {profile.members.length} household members
-                  </p>
-                  <h1 className="text-2xl font-bold tracking-tight text-slate-950 [text-wrap:balance]">
-                    {strings.today.headline}
-                  </h1>
-                  <p className="text-xs leading-relaxed text-slate-600">{strings.today.subtitle}</p>
-                </div>
-
-                <div className="space-y-2 pt-1">
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {HOUSEHOLD_PRESETS.map((preset) => (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => {
-                          setActivePresetId(preset.id);
-                          setHasCustomQuery(false);
-                          setProfile(preset.profile);
-                        }}
-                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${
-                          activePresetId === preset.id
-                            ? 'border-teal-700 bg-teal-50 text-teal-950 font-semibold'
-                            : 'border-slate-200 bg-white/80 text-slate-700 hover:border-teal-600'
-                        }`}
-                      >
-                        {lang === 'hi' ? preset.labelHi : preset.labelEn}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-                    <span>Priority: {profile.members[0]?.label}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>Budget: {profile.constraints.budget_band.replace('_', ' ')}</span>
-                    <button
-                      type="button"
-                      onClick={() => navigateTo('household')}
-                      className="font-semibold text-teal-800 hover:underline"
-                    >
-                      Edit household
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="aurora-surface rounded-2xl p-5 lg:col-span-3 flex items-center">
-                {aqError ? (
-                  <div className="space-y-2 text-xs">
-                    <p className="font-semibold text-amber-900">No live reading</p>
-                    <p className="text-slate-600">{aqError}</p>
-                    <button
-                      type="button"
-                      onClick={loadAirQuality}
-                      className="font-semibold text-teal-800 hover:underline"
-                    >
-                      Retry telemetry
-                    </button>
-                  </div>
-                ) : (
-                  <BreathOrb
-                    pm25={aqData?.pm2_5 ?? null}
-                    pm25Range={aqData?.pm2_5_range}
-                    asOf={aqData?.as_of}
-                    label="Grid PM2.5"
-                    reduceMotion={reduceMotion}
-                    isStale={aqData?.is_stale}
-                  />
-                )}
-              </div>
-
-              <div className="aurora-surface rounded-2xl p-5 lg:col-span-4 flex items-center">
-                <ExposureRing
-                  baselinePm25={aqData?.pm2_5 ?? null}
-                  plan={activePlan}
-                  completedRanks={completedRanks}
-                  title={strings.today.exposureBudgetTitle}
-                  withPlanLabel={strings.today.withPlanLabel}
-                  withoutPlanLabel={strings.today.withoutPlanLabel}
-                />
-              </div>
-            </section>
+            <TodayBento
+              selectedRegion={selectedRegion}
+              profile={profile}
+              presets={HOUSEHOLD_PRESETS}
+              activePresetId={activePresetId}
+              hasCustomQuery={hasCustomQuery}
+              onSelectPreset={(preset) => {
+                setActivePresetId(preset.id);
+                setHasCustomQuery(false);
+                setProfile(preset.profile);
+              }}
+              onNavigateHousehold={() => navigateTo('household')}
+              aqData={aqData}
+              aqError={aqError}
+              onRetryAq={loadAirQuality}
+              reduceMotion={reduceMotion}
+              activePlan={activePlan}
+              completedRanks={completedRanks}
+              lang={lang}
+              strings={strings}
+            />
 
             {/* Copilot Prompt Dock */}
-            <section className="aurora-surface rounded-2xl p-5 space-y-4">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  submitPlanQuery(queryInput);
-                }}
-                className="flex flex-col gap-3 sm:flex-row"
-              >
-                <label htmlFor="copilot-query" className="sr-only">
-                  Describe your household situation or decision
-                </label>
-                <input
-                  id="copilot-query"
-                  type="text"
-                  value={queryInput}
-                  onChange={(e) => setQueryInput(e.target.value)}
-                  placeholder={strings.today.promptPlaceholder}
-                  maxLength={1200}
-                  className="min-h-[48px] flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-teal-700 focus:outline-none"
-                />
-                <button
-                  type="submit"
-                  disabled={planLoading || !queryInput.trim()}
-                  className="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-teal-700 px-6 py-2.5 text-sm font-semibold text-white hover:bg-teal-800 disabled:opacity-50 whitespace-nowrap shrink-0"
-                >
-                  {planLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                      <span>Working…</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>{strings.actions.getPlan}</span>
-                      <ArrowRight className="h-4 w-4" aria-hidden="true" />
-                    </>
-                  )}
-                </button>
-              </form>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium text-slate-500">
-                  {strings.today.quickScenariosLabel}
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {QUICK_SCENARIOS.map((sc) => (
-                    <button
-                      key={sc.id}
-                      type="button"
-                      disabled={planLoading}
-                      onClick={() => {
-                        setQueryInput(sc.prompt);
-                        submitPlanQuery(sc.prompt);
-                      }}
-                      className={`min-h-[36px] rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors whitespace-nowrap shrink-0 ${
-                        sc.id === 'redflag'
-                          ? 'border-red-200 bg-red-50/70 text-red-900 hover:bg-red-100'
-                          : 'border-slate-200 bg-white/85 text-slate-700 hover:border-teal-600 hover:text-teal-900'
-                      }`}
-                    >
-                      {lang === 'hi' ? sc.labelHi : sc.labelEn}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {planError && (
-                <div
-                  role="alert"
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-xs text-red-950"
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 shrink-0 text-red-700" aria-hidden="true" />
-                    <span>{planError}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => submitPlanQuery(queryInput)}
-                    className="font-semibold text-red-800 hover:underline"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-            </section>
+            <PlanQueryBar
+              queryInput={queryInput}
+              onChangeQueryInput={setQueryInput}
+              onSubmitQuery={(prompt) => submitPlanQuery(prompt)}
+              planLoading={planLoading}
+              planError={planError}
+              scenarios={QUICK_SCENARIOS}
+              lang={lang}
+              strings={strings}
+            />
 
             {/* Plan Output + Save Bar */}
             {planLoading ? (
