@@ -30,6 +30,7 @@ export const HouseholdProfileSchema = z.object({
       cadr_m3_hr: z.number().min(0).max(1500).optional(),
     }),
     masks: z.array(z.enum(['none', 'cloth_surgical', 'n95_kn95_kf94', 'valved_n95'])).max(4),
+    incense_or_dhoop: z.boolean().optional(),
   }),
   commute: z.object({
     mode: z.enum(['walking', 'two_wheeler', 'public_transit', 'car', 'work_from_home']),

@@ -142,3 +142,153 @@ test('Physics Defect 4: variance_share_pct is dynamically computed and sums to 1
     `Variance shares must sum to ~100%, but summed to ${sumVariance}%`
   );
 });
+
+test('Physics Defect 7.6: avoid_incense yields 0 avoided dose when profile has no incense source, and >0 when incense is present', () => {
+  const baseProfile = WORKED_SCENARIOS.leaky_1bhk_toddler.profile;
+  const noIncenseProfile = {
+    ...baseProfile,
+    home: {
+      ...baseProfile.home,
+      incense_or_dhoop: false,
+    },
+  };
+
+  const impNoIncense = impactEstimate({
+    profile: noIncenseProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.leaky_1bhk_toddler.schedule,
+    action: 'avoid_incense',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    seed: 42,
+    num_draws: 80,
+  });
+
+  assert.equal(
+    impNoIncense.value.dose_avoided_median_ug,
+    0,
+    `Homes with no incense source must evaluate avoid_incense to 0 avoided dose, got ${impNoIncense.value.dose_avoided_median_ug}`
+  );
+  assert.equal(impNoIncense.value.daily_reduction_pct.median, 0);
+
+  const incenseProfile = {
+    ...baseProfile,
+    home: {
+      ...baseProfile.home,
+      incense_or_dhoop: true,
+    },
+  };
+
+  const impWithIncense = impactEstimate({
+    profile: incenseProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.leaky_1bhk_toddler.schedule,
+    action: 'avoid_incense',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    seed: 42,
+    num_draws: 80,
+  });
+
+  assert.ok(
+    impWithIncense.value.dose_avoided_median_ug > 50,
+    `Homes with incense source must receive non-zero avoided dose, got ${impWithIncense.value.dose_avoided_median_ug}`
+  );
+  assert.ok(impWithIncense.value.daily_reduction_pct.median > 0);
+});
+
+test('Physics Defect 8.1: confidence drops when priors are assumed or data is incomplete', () => {
+  const baseProfile = WORKED_SCENARIOS.sealed_flat_purifier.profile;
+  const sealedProfile = {
+    ...baseProfile,
+    home: {
+      ...baseProfile.home,
+      windows_habit: 'mostly_closed' as const,
+    },
+  };
+
+  // Action using assumed prior (ach_drafty_closed has status="assumed")
+  const impAssumed = impactEstimate({
+    profile: sealedProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.sealed_flat_purifier.schedule,
+    action: 'seal_gaps',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    seed: 42,
+    num_draws: 100,
+  });
+
+  assert.notEqual(
+    impAssumed.confidence,
+    'high',
+    `Actions relying on assumed priors must never report high confidence! Got: ${impAssumed.confidence}`
+  );
+
+  // Incomplete forecast (< 24 hours) must also downgrade confidence
+  const impIncomplete = impactEstimate({
+    profile: sealedProfile,
+    target_member_age_band: 'adult',
+    schedule: WORKED_SCENARIOS.sealed_flat_purifier.schedule,
+    action: 'run_purifier_presleep',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25.slice(0, 12),
+    seed: 42,
+    num_draws: 100,
+  });
+
+  assert.notEqual(
+    impIncomplete.confidence,
+    'high',
+    `Incomplete forecast inputs (< 24h) must drop confidence! Got: ${impIncomplete.confidence}`
+  );
+});
+
+test('Physics Defect 8.2: determinism: identical seed produces identical output byte-for-byte', () => {
+  const sc = WORKED_SCENARIOS.leaky_1bhk_toddler;
+  const run1 = impactEstimate({
+    profile: sc.profile,
+    target_member_age_band: 'adult',
+    schedule: sc.schedule,
+    action: 'diy_filter',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    seed: 12345,
+    num_draws: 150,
+  });
+
+  const run2 = impactEstimate({
+    profile: sc.profile,
+    target_member_age_band: 'adult',
+    schedule: sc.schedule,
+    action: 'diy_filter',
+    forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+    seed: 12345,
+    num_draws: 150,
+  });
+
+  assert.deepEqual(run1.value, run2.value, 'Same seed must yield identical Monte Carlo results');
+});
+
+test('Physics Defect 8.3: stability across 5 seeds at N=300 draws remains within ±5% tolerance', () => {
+  const sc = WORKED_SCENARIOS.leaky_1bhk_toddler;
+  const seeds = [101, 202, 303, 404, 505];
+  const medians: number[] = [];
+
+  for (const s of seeds) {
+    const res = impactEstimate({
+      profile: sc.profile,
+      target_member_age_band: 'adult',
+      schedule: sc.schedule,
+      action: 'run_purifier_presleep',
+      forecast_pm25_hourly: DELHI_WINTER_24H_PM25,
+      seed: s,
+      num_draws: 300,
+    });
+    medians.push(res.value.daily_reduction_pct.median);
+  }
+
+  const avg = medians.reduce((a, b) => a + b, 0) / medians.length;
+  for (const m of medians) {
+    const diffPct = Math.abs(m - avg);
+    assert.ok(
+      diffPct <= 5,
+      `Seed variation ${diffPct.toFixed(2)}% exceeded ±5% tolerance around average ${avg.toFixed(2)}% (value: ${m}%)`
+    );
+  }
+});

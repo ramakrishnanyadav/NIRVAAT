@@ -74,44 +74,45 @@ async function generateContentWithFallback(
 // H3: Deterministic Red-Flag Symptom Pre-Screen (English + Hinglish + Hindi Devanagari)
 const RED_FLAG_PATTERNS: RegExp[] = [
   // 1. Chest pain / pressure / tightness
-  /\b(chest pain|chest tightness|tightness in chest|crushing chest|chest pressure)\b/i,
+  /\b(chest\s+pain|chest\s+tightness|tightness\s+in\s+chest|crushing\s+chest|chest\s+pressure)\b/i,
   /\b(seene\s+(?:me|mein|meinn?)\s+(?:dard|jakdan|jalan|dabaav))\b/i,
   /(सीने में\s*.{0,15}(?:दर्द|जकड़न|दबाव))/,
 
-  // 2. Cyanosis / Blue or grey lips
+  // 2. Cyanosis / Blue or grey lips / skin
   /\b(?:blue|grey|gray)\s+(?:lips|fingernails|face|skin)\b/i,
-  /\b(?:lips|fingernails|face|skin)\s+(?:turning\s+)?(?:blue|grey|gray)\b/i,
+  /\b(?:lips|fingernails|face|skin)\s+(?:(?:turning|turned|went|became|are)\s+)?(?:blue|grey|gray)\b/i,
   /\bcyanosis\b/i,
   /\b(?:neele?|neela)\s+(?:hoth|honth|naakhun)\b/i,
-  /\b(?:hoth|honth|naakhun)\s+.{0,10}(?:neele?|neela)\b/i,
-  /(?:(?:नीले|भूरे)\s*(?:होंठ|नाखून)|(?:होंठ|नाखून)\s*.{0,10}(?:नीले|भूरे))/,
+  /\b(?:hoth|honth|naakhun)\s+.{0,15}(?:neele?|neela)\b/i,
+  /(?:(?:नीले|भूरे)\s*(?:होंठ|नाखून|त्वचा)|(?:होंठ|नाखून|त्वचा)\s*.{0,15}(?:नीले|भूरे))/,
 
   // 3. Fainting / Unconsciousness
-  /\b(fainting|fainted|passed out|unconscious|loss of consciousness)\b/i,
-  /\b(behosh(?:i)?|chakkar aake gir)\b/i,
+  /\b(fainting|fainted|passed\s+out|unconscious|loss\s+of\s+consciousness)\b/i,
+  /\b(behosh(?:i)?|chakkar\s+aake\s+gir)\b/i,
   /(बेहोश|मूर्छित|अचेत)/,
 
   // 4. Coughing blood
-  /\b(coughing (?:up )?blood|blood in (?:cough|phlegm|sputum)|hemoptysis)\b/i,
-  /\b(khoon ki khansi|khansi\s+(?:me|mein)\s+khoon)\b/i,
+  /\b(coughing\s+(?:up\s+)?blood|blood\s+in\s+(?:cough|phlegm|sputum)|hemoptysis)\b/i,
+  /\b(khoon\s+ki\s+khansi|khansi\s+(?:me|mein)\s+khoon)\b/i,
   /(खांसी में खून|खून की खांसी)/,
 
   // 5. Severe breathlessness / asphyxia / suffocation
-  /\b(severe breathlessness|worsening breathlessness|difficulty breathing|shortness of breath|gasping for air|struggling to breathe|cannot breathe|can['’]t breathe|unable to breathe)\b/i,
-  /\b(saans\s+(?:nahi|nahin)\s+aa\s+rahi|saans\s+phool\s+rahi|saans\s+lene\s+(?:me|mein)\s+.{0,20}(?:takleef|dikkat|mushkil)|dum\s+ghut(?: raha)?)\b/i,
-  /((?:सांस|साँस)\s*(?:लेने में\s*.{0,20}(?:तकलीफ|दिक्कत|कठिनाई)|नहीं आ रही|फूल रही)|दम\s*घुट)/,
+  /\b(severe\s+breathlessness|worsening\s+breathlessness|diff?iculty\s+breathing|shortness\s+of\s+breath|gasping\s+for\s+air|struggling\s+to\s+breathe|cannot\s+breathe|can['’]t\s+breathe?|cant\s+breathe?|unable\s+to\s+breathe)\b/i,
+  /\b(saans\s+(?:nahi|nahin)\s+(?:aa\s+rahi|le\s+p[a|aa]\s+rah[ai]|le\s+sak)|saans\s+phool\s+rahi|saans\s+lene\s+(?:me|mein)\s+.{0,25}(?:takleef|dikkat|mushkil)|dum\s+ghut(?: raha)?)\b/i,
+  /((?:सांस|साँस)\s*(?:लेने में\s*.{0,25}(?:तकलीफ|दिक्कत|कठिनाई|परेशानी)|नहीं आ रही|नहीं ले पा|फूल रही)|दम\s*घुट)/,
 
-  // 6. Pediatric respiratory distress (nostril flaring, intercostal retractions)
-  /\b(infant|toddler|baby|newborn).{0,35}\b(respiratory distress|struggling to breathe|ribs pulling|flaring nostrils|not breathing well|gasping)\b/i,
-  /(बच्चे|शिशु).{0,30}(?:पसलियां धंस|सांस फूल|सांस लेने में)/,
+  // 6. Pediatric respiratory distress (nostril flaring, intercostal retractions, Hinglish + Devanagari)
+  /\b(infant|toddler|baby|newborn)\b.{0,35}\b(respiratory\s+distress|struggling\s+to\s+breathe|ribs\s+pulling|flaring\s+nostrils|not\s+breathing\s+well|gasping)\b/i,
+  /\b(bachch[aei]|bacch[aei]|baby|toddler)\b.{0,30}\b(?:saans\s+(?:nahi|nahin)|pasliyan\s+dhans|saans\s+phool)\b/i,
+  /(बच्चे|शिशु|बच्चा).{0,30}(?:पसलियां धंस|सांस फूल|सांस लेने में|सांस नहीं)/,
 
   // 7. Unrelieved wheezing with inhaler
-  /\b(wheeze|wheezing).{0,40}\b(not settling|not responding|still bad|worse after|theek nahi|shant nahi).{0,25}\b(inhaler|reliever|nebulizer|pump)\b/i,
-  /\b(inhaler|reliever|nebulizer|pump)\b.{0,35}\b(?:ke baad bhi|after).{0,25}\b(?:wheeze|saans)\b/i,
+  /\b(wheeze|wheezing).{0,40}\b(not\s+settling|not\s+responding|still\s+bad|worse\s+after|theek\s+nahi|shant\s+nahi).{0,25}\b(inhaler|reliever|nebulizer|pump)\b/i,
+  /\b(inhaler|reliever|nebulizer|pump)\b.{0,35}\b(?:ke\s+baad\s+bhi|after).{0,25}\b(?:wheeze|saans)\b/i,
   /(?:इनहेलर|पंप).{0,30}(?:के बाद भी|शांत नहीं).{0,20}(?:सांस|घरघराहट)/,
 
   // 8. Acute neurological confusion / altered sensorium (never bare 'confusion')
-  /\b(sudden confusion|mental confusion|acute confusion|disoriented|slurred speech|acting confused)\b/i,
+  /\b(sudden\s+confusion|mental\s+confusion|acute\s+confusion|disoriented|slurred\s+speech|acting\s+confused)\b/i,
   /(अचानक भ्रम|असंगत बोल)/,
 ];
 
@@ -380,7 +381,7 @@ const BANNED_ADVICE_REGEXES: Array<{ rx: RegExp; rule: string; fix: string }> = 
     fix: 'Remove any recommendation to burn substances to clean air.',
   },
   {
-    rx: /\b(put|wear|use)\b.{0,25}\b(mask|n95|kn95|kf94)\b.{0,30}\b(under 2|under two|infant|baby|18.?month|1.?year.?old)\b/i,
+    rx: /(?<!\b(?:do\s+not|don['’]t|never)\s+)\b(put|wear|use)\b.{0,25}\b(mask|n95|kn95|kf94)\b.{0,30}\b(under 2|under two|infant|baby|18.?month|1.?year.?old)\b/i,
     rule: 'V3_NO_MASK_UNDER_2',
     fix: 'Never recommend masks for children under age 2.',
   },
@@ -512,7 +513,16 @@ export function auditDraftPlan(
           const expectedWithout = typeof val.without === 'string' ? val.without : null;
           const expectedChange = typeof val.change_range === 'string' ? val.change_range : null;
 
-          const extractNums = (s: string | null) => (s ? (s.match(/\d+(?:\.\d+)?/g) || []).map(Number) : []);
+          const normalizeDevanagariNumerals = (str: string): string => {
+            const devMap: Record<string, string> = {
+              '०': '0', '१': '1', '२': '2', '३': '3', '४': '4',
+              '५': '5', '६': '6', '७': '7', '८': '8', '९': '9',
+            };
+            return str.replace(/[०-९]/g, (ch) => devMap[ch] ?? ch);
+          };
+
+          const extractNums = (s: string | null) =>
+            s ? (normalizeDevanagariNumerals(s).match(/\d+(?:\.\d+)?/g) || []).map(Number) : [];
 
           if (action.effect.with && expectedWith) {
             const draftNums = extractNums(action.effect.with);

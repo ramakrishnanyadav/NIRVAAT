@@ -1,0 +1,457 @@
+[
+  {
+    "id": "rf-en-01",
+    "text": "My grandfather is gasping for air right now",
+    "expected_red_flag": true,
+    "category": "severe_breathlessness",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-02",
+    "text": "She has severe chest pain and tightness",
+    "expected_red_flag": true,
+    "category": "chest_pain",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-03",
+    "text": "He cannot breathe and lips are turning blue",
+    "expected_red_flag": true,
+    "category": "cyanosis",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-04",
+    "text": "my lips turned blue after being outside",
+    "expected_red_flag": true,
+    "category": "cyanosis",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-05",
+    "text": "Baby is struggling to breathe with flaring nostrils",
+    "expected_red_flag": true,
+    "category": "pediatric_distress",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-06",
+    "text": "The toddler has respiratory distress and ribs pulling in",
+    "expected_red_flag": true,
+    "category": "pediatric_distress",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-07",
+    "text": "I can’t breathe at all with this smog",
+    "expected_red_flag": true,
+    "category": "curly_apostrophe",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-08",
+    "text": "I can't breathe at all",
+    "expected_red_flag": true,
+    "category": "straight_apostrophe",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-09",
+    "text": "Help, cant breath and chest pressure",
+    "expected_red_flag": true,
+    "category": "typo_cant_breath",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-10",
+    "text": "Experiencing sudden confusion and slurred speech",
+    "expected_red_flag": true,
+    "category": "acute_neurological",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-11",
+    "text": "Wheezing is not settling after taking inhaler",
+    "expected_red_flag": true,
+    "category": "unresponsive_wheeze",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-12",
+    "text": "My mother is coughing up blood",
+    "expected_red_flag": true,
+    "category": "hemoptysis",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-13",
+    "text": "Patient has blood in phlegm and fever",
+    "expected_red_flag": true,
+    "category": "hemoptysis",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-14",
+    "text": "He fainted and became unconscious on the street",
+    "expected_red_flag": true,
+    "category": "unconsciousness",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-15",
+    "text": "I am having extreme difficulty breathing right now",
+    "expected_red_flag": true,
+    "category": "difficulty_breathing",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-16",
+    "text": "Having dificulty breathing since morning",
+    "expected_red_flag": true,
+    "category": "typo_difficulty",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-17",
+    "text": "Crushing chest pain radiating to my shoulder",
+    "expected_red_flag": true,
+    "category": "chest_pain",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-18",
+    "text": "Noticeable cyanosis around toddler mouth and fingernails",
+    "expected_red_flag": true,
+    "category": "cyanosis",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-19",
+    "text": "The patient is completely disoriented and acting confused",
+    "expected_red_flag": true,
+    "category": "acute_confusion",
+    "language": "en"
+  },
+  {
+    "id": "rf-en-20",
+    "text": "Shortness of breath is worsening dramatically",
+    "expected_red_flag": true,
+    "category": "severe_breathlessness",
+    "language": "en"
+  },
+  {
+    "id": "rf-hi-21",
+    "text": "सांस लेने में बहुत ज्यादा तकलीफ हो रही है",
+    "expected_red_flag": true,
+    "category": "breathlessness_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-22",
+    "text": "सीने में दर्द और भारी जकड़न है",
+    "expected_red_flag": true,
+    "category": "chest_pain_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-23",
+    "text": "बच्चे की पसलियां धंस रही हैं और सांस फूल रही है",
+    "expected_red_flag": true,
+    "category": "pediatric_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-24",
+    "text": "मरीज बेहोश हो गया है और कोई प्रतिक्रिया नहीं दे रहा",
+    "expected_red_flag": true,
+    "category": "unconscious_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-25",
+    "text": "होंठ नीले पड़ रहे हैं और चेहरा पीला पड़ गया",
+    "expected_red_flag": true,
+    "category": "cyanosis_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-26",
+    "text": "खांसी में खून आ रहा है बहुत देर से",
+    "expected_red_flag": true,
+    "category": "hemoptysis_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-27",
+    "text": "इनहेलर के बाद भी सांस नहीं आ रही है",
+    "expected_red_flag": true,
+    "category": "inhaler_failure_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-28",
+    "text": "धुएं से दम घुट रहा है और सांस बिल्कुल नहीं आ रही",
+    "expected_red_flag": true,
+    "category": "suffocation_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-29",
+    "text": "बच्चा सांस नहीं ले पा रहा है",
+    "expected_red_flag": true,
+    "category": "pediatric_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hi-30",
+    "text": "अचानक भ्रम हो रहा है और बोली लड़खड़ा रही है",
+    "expected_red_flag": true,
+    "category": "acute_confusion_devanagari",
+    "language": "hi"
+  },
+  {
+    "id": "rf-hin-31",
+    "text": "Dada ji ko seene mein dard ho raha hai",
+    "expected_red_flag": true,
+    "category": "hinglish_chest_pain",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-32",
+    "text": "Bache ko saans lene me takleef ho rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_breathlessness",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-33",
+    "text": "bachcha saans nahi le pa raha",
+    "expected_red_flag": true,
+    "category": "hinglish_pediatric_indirect",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-34",
+    "text": "Achanak saans phool rahi hai aur behosh ho gaye",
+    "expected_red_flag": true,
+    "category": "hinglish_unconscious",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-35",
+    "text": "Inhaler lene ke baad bhi wheeze theek nahi ho raha",
+    "expected_red_flag": true,
+    "category": "hinglish_inhaler_failure",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-36",
+    "text": "Hoth neele pad rahe hain aur thand lag rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_cyanosis",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-37",
+    "text": "Khoon ki khansi aayi hai subah se",
+    "expected_red_flag": true,
+    "category": "hinglish_hemoptysis",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-38",
+    "text": "Dum ghut raha hai aur saans nahi aa rahi",
+    "expected_red_flag": true,
+    "category": "hinglish_suffocation",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-39",
+    "text": "baccha saans nahi le paa raha bahut ro raha hai",
+    "expected_red_flag": true,
+    "category": "hinglish_pediatric",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-40",
+    "text": "seene me jakdan aur jalan ho rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_chest_pain",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-41",
+    "text": "chakkar aake gir pade aur behosh ho gaye",
+    "expected_red_flag": true,
+    "category": "hinglish_fainting",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-42",
+    "text": "naakhun neele ho gaye hain aur saans fool rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_cyanosis",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-43",
+    "text": "pump lene ke baad bhi saans ruk rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_inhaler_failure",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-44",
+    "text": "khansi mein khoon ke thakke nikle hain",
+    "expected_red_flag": true,
+    "category": "hinglish_hemoptysis",
+    "language": "hinglish"
+  },
+  {
+    "id": "rf-hin-45",
+    "text": "saans lene me bahut dikkat ho rahi hai",
+    "expected_red_flag": true,
+    "category": "hinglish_breathlessness",
+    "language": "hinglish"
+  },
+  {
+    "id": "neg-01",
+    "text": "There is confusion about whether to buy a HEPA filter",
+    "expected_red_flag": false,
+    "category": "near_miss_confusion",
+    "language": "en"
+  },
+  {
+    "id": "neg-02",
+    "text": "I have confusion regarding window timing in Delhi",
+    "expected_red_flag": false,
+    "category": "near_miss_confusion",
+    "language": "en"
+  },
+  {
+    "id": "neg-03",
+    "text": "Clearing confusion about Corsi-Rosenthal boxes",
+    "expected_red_flag": false,
+    "category": "near_miss_confusion",
+    "language": "en"
+  },
+  {
+    "id": "neg-04",
+    "text": "How can I reduce inhaled dose of PM2.5?",
+    "expected_red_flag": false,
+    "category": "near_miss_dose",
+    "language": "en"
+  },
+  {
+    "id": "neg-05",
+    "text": "What should I do during morning inversion hours?",
+    "expected_red_flag": false,
+    "category": "near_miss_inversion",
+    "language": "en"
+  },
+  {
+    "id": "neg-06",
+    "text": "Is it safe to walk in the afternoon?",
+    "expected_red_flag": false,
+    "category": "near_miss_walking",
+    "language": "en"
+  },
+  {
+    "id": "neg-07",
+    "text": "We cook with LPG in a small 1BHK apartment",
+    "expected_red_flag": false,
+    "category": "near_miss_cooking",
+    "language": "en"
+  },
+  {
+    "id": "neg-08",
+    "text": "confusion about GRAP stages and odd-even rules",
+    "expected_red_flag": false,
+    "category": "near_miss_confusion_grap",
+    "language": "en"
+  },
+  {
+    "id": "neg-09",
+    "text": "can I buy a purifier for my baby",
+    "expected_red_flag": false,
+    "category": "near_miss_baby_purifier",
+    "language": "en"
+  },
+  {
+    "id": "neg-10",
+    "text": "What is the difference between blue air purifier and white air purifier?",
+    "expected_red_flag": false,
+    "category": "near_miss_color_blue",
+    "language": "en"
+  },
+  {
+    "id": "neg-11",
+    "text": "Can we wear a blue cloth mask during commute?",
+    "expected_red_flag": false,
+    "category": "near_miss_color_blue_mask",
+    "language": "en"
+  },
+  {
+    "id": "neg-12",
+    "text": "Is chest congestion common during winter smog?",
+    "expected_red_flag": false,
+    "category": "near_miss_chest_congestion",
+    "language": "en"
+  },
+  {
+    "id": "neg-13",
+    "text": "My throat feels a bit scratchy from vehicle exhaust",
+    "expected_red_flag": false,
+    "category": "near_miss_scratchy_throat",
+    "language": "en"
+  },
+  {
+    "id": "neg-14",
+    "text": "Should I store asthma inhaler in the refrigerator?",
+    "expected_red_flag": false,
+    "category": "near_miss_inhaler_storage",
+    "language": "en"
+  },
+  {
+    "id": "neg-15",
+    "text": "How many hours of purifier use is recommended?",
+    "expected_red_flag": false,
+    "category": "near_miss_hours",
+    "language": "en"
+  },
+  {
+    "id": "neg-16",
+    "text": "Does burning dhoop create fine particles?",
+    "expected_red_flag": false,
+    "category": "near_miss_dhoop_question",
+    "language": "en"
+  },
+  {
+    "id": "neg-17",
+    "text": "What is the official AQI in Anand Vihar right now?",
+    "expected_red_flag": false,
+    "category": "near_miss_aqi",
+    "language": "en"
+  },
+  {
+    "id": "neg-18",
+    "text": "Is coughing once or twice expected after a walk?",
+    "expected_red_flag": false,
+    "category": "near_miss_coughing",
+    "language": "en"
+  },
+  {
+    "id": "neg-19",
+    "text": "Can a 2-year old toddler wear a cloth scarf outside?",
+    "expected_red_flag": false,
+    "category": "near_miss_toddler_scarf",
+    "language": "en"
+  },
+  {
+    "id": "neg-20",
+    "text": "Does weatherstripping door gaps really prevent smoke?",
+    "expected_red_flag": false,
+    "category": "near_miss_weatherstripping",
+    "language": "en"
+  }
+]

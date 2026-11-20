@@ -1,0 +1,36 @@
+name: NIRVAAT Safety & Engine CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+jobs:
+  audit-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Static Analysis & TypeScript Typecheck
+        run: npm run lint
+
+      - name: Run Test Pyramid (Physics, Verifier, Regressions, Red-Flag, API)
+        run: npm test
+
+      - name: Measure Test Coverage
+        run: npm run test:coverage
+
+      - name: Production Client & Server Build
+        run: npm run build

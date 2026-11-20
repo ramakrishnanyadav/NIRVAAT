@@ -175,7 +175,7 @@ const MAX_IMPACT_CACHE_SIZE = 250;
 
 function computeImpactCacheKey(input: ImpactEstimateInput): string {
   const forecastSig = (input.forecast_pm25_hourly ?? []).slice(0, 12).join(',');
-  const homeSig = `${input.profile?.home?.size_band}_${input.profile?.home?.windows_habit}_${input.profile?.home?.cooking_fuel}_${input.profile?.home?.purifier?.has}_${input.profile?.home?.purifier?.cadr_m3_hr ?? 0}`;
+  const homeSig = `${input.profile?.home?.size_band}_${input.profile?.home?.windows_habit}_${input.profile?.home?.cooking_fuel}_${input.profile?.home?.purifier?.has}_${input.profile?.home?.purifier?.cadr_m3_hr ?? 0}_${Boolean((input.profile?.home as any)?.incense_or_dhoop)}`;
   return `${input.action}_${input.target_member_age_band}_${homeSig}_${input.schedule?.length ?? 0}_${forecastSig}_${input.seed ?? 42019}_${input.num_draws ?? 120}`;
 }
 
@@ -378,13 +378,21 @@ export function impactEstimate(
         withSourceArr[h] = withSourceArr[h] * 0.25;
       }
     } else if (input.action === 'avoid_incense') {
-      const sInc = sampleTriangular(
-        rng,
-        PARAMETER_PRIORS.source_incense_coil.q10,
-        PARAMETER_PRIORS.source_incense_coil.median,
-        PARAMETER_PRIORS.source_incense_coil.q90
+      const hasIncense = Boolean(
+        (input.profile.home as any)?.incense_or_dhoop ??
+        (input.profile.home as any)?.incense_use ??
+        (input.profile as any)?.has_incense ??
+        false
       );
-      baseSourceArr[19] += sInc; // Baseline has evening incense plume; action avoids it
+      if (hasIncense) {
+        const sInc = sampleTriangular(
+          rng,
+          PARAMETER_PRIORS.source_incense_coil.q10,
+          PARAMETER_PRIORS.source_incense_coil.median,
+          PARAMETER_PRIORS.source_incense_coil.q90
+        );
+        baseSourceArr[19] += sInc; // Baseline has evening incense plume; action avoids it
+      }
     } else if (input.action === 'time_shift_commute') {
       // Strictly conserve 24 hours: vacated commute/outdoor hour becomes indoor home activity
       const commuteSlots = input.schedule.filter((s) => s.micro_env === 'commute' || s.micro_env === 'outdoors');
@@ -501,10 +509,15 @@ export function impactEstimate(
   const pctMed = quantile(dPctS, 0.5);
   const pctQ90 = quantile(dPctS, 0.9);
 
-  // Derive confidence from relative interval width AND data completeness
+  // Derive confidence from relative interval width AND data completeness / assumed priors
   const spread = Math.abs(pctQ90 - pctQ10);
   const isAssumedData = input.profile.home.windows_habit === 'loose_frames_drafty' || input.forecast_pm25_hourly.length < 24;
-  const confidence: ConfidenceLevel = (spread <= 14 && !isAssumedData) ? 'high' : (spread <= 28) ? 'medium' : 'low';
+  const actionAssumedPrior =
+    (input.action === 'seal_gaps' && PARAMETER_PRIORS.ach_drafty_closed?.status === 'assumed') ||
+    (input.action === 'diy_filter' && PARAMETER_PRIORS.cadr_derating_diy?.status === 'assumed') ||
+    (input.action === 'n95_on_commute' && input.target_member_age_band !== 'adult' && PARAMETER_PRIORS.mask_n95_fit_child?.status === 'assumed');
+  const hasAssumed = isAssumedData || actionAssumedPrior;
+  const confidence: ConfidenceLevel = (spread <= 14 && !hasAssumed) ? 'high' : (spread <= 28) ? 'medium' : 'low';
 
   // Dynamic sensitivity attribution based on empirical sample variance decomposition
   const topUncertainties: SensitivityDriver[] = [];
