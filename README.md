@@ -22,6 +22,7 @@
 <p align="center">
   <b><a href="#-executive-summary--mvp-objectives">Executive Summary</a></b> •
   <b><a href="#-5-minute-interactive-judge-walkthrough">5-Min Judge Walkthrough</a></b> •
+  <b><a href="docs/QUALITY_PACKET.md">Engineering Quality Packet</a></b> •
   <b><a href="#-system-architecture">Architecture</a></b> •
   <b><a href="#-core-features--mvp-capabilities">Core Features</a></b> •
   <b><a href="#-automated-verification--test-pyramid">Test Pyramid (54 Tests)</a></b> •
