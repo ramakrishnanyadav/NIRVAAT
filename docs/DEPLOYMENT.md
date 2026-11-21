@@ -23,7 +23,7 @@ NIRVAAT includes a `render.yaml` blueprint at the root of the repository.
 4. Render will automatically detect `render.yaml`:
    - **Service Name**: `nirvaat-copilot`
    - **Runtime**: `Node`
-   - **Build Command**: `pnpm install && pnpm run build`
+   - **Build Command**: `pnpm install --no-frozen-lockfile && pnpm run build`
    - **Start Command**: `pnpm start`
    - **Health Check Path**: `/api/health`
 5. Under Environment Variables, enter your **`GEMINI_API_KEY`**.
@@ -46,7 +46,7 @@ If you prefer configuring the Web Service manually:
    - **Runtime**: `Node`
    - **Build Command**:
      ```bash
-     pnpm install && pnpm run build
+     pnpm install --no-frozen-lockfile && pnpm run build
      ```
    - **Start Command**:
      ```bash
