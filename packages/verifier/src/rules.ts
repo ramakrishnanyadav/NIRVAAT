@@ -5,6 +5,8 @@ export interface BannedAdviceRule {
   test?: (text: string) => boolean;
 }
 
+const MASK_UNDER_2_RX = /\b(?:put|wear|place|use|mask\s+on)\s+(?:an?\s+)?(?:n95|kn95|mask)(?:\s+(?:on|for))?\s+(?:your\s+|the\s+)?(?:infant|baby|newborn|(?:toddler|child)\s+under\s+2)\b/i;
+
 export const BANNED_ADVICE_REGEXES: BannedAdviceRule[] = [
   {
     rule: 'V3_NO_MEDICATION_CHANGE',
@@ -23,9 +25,9 @@ export const BANNED_ADVICE_REGEXES: BannedAdviceRule[] = [
   },
   {
     rule: 'V3_NO_MASK_UNDER_2',
-    rx: /\b(?:put|wear|place|use|mask\s+on)\s+(?:an?\s+)?(?:n95|kn95|mask)\s+(?:on|for)?\s*(?:your\s+|the\s+)?(?:infant|baby|newborn|toddler\s+under\s+2|child\s+under\s+2)\b/i,
+    rx: MASK_UNDER_2_RX,
     test: (text: string) => {
-      const match = /\b(?:put|wear|place|use|mask\s+on)\s+(?:an?\s+)?(?:n95|kn95|mask)\s+(?:on|for)?\s*(?:your\s+|the\s+)?(?:infant|baby|newborn|toddler\s+under\s+2|child\s+under\s+2)\b/i.exec(text);
+      const match = MASK_UNDER_2_RX.exec(text);
       if (!match) return false;
       const prefix = text.slice(Math.max(0, match.index - 35), match.index).toLowerCase();
       if (/\b(?:do\s+not|never|avoid|not|don't)\s*$/i.test(prefix)) return false;
