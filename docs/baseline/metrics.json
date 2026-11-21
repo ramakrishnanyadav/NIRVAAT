@@ -1,0 +1,61 @@
+{
+  "timestamp": "2026-11-22T02:50:00Z",
+  "version": "1.0.0",
+  "git_commit": "83c43c8",
+  "test_counts": {
+    "total": 54,
+    "passing": 54,
+    "failing": 0,
+    "skipped": 0,
+    "duration_ms": 2861.73
+  },
+  "coverage": {
+    "engines": { "line_pct": 98.2, "branch_pct": 92.4 },
+    "verifier": { "line_pct": 97.5, "branch_pct": 94.1 },
+    "red_flag": { "line_pct": 100.0, "branch_pct": 100.0 },
+    "server_routes": { "line_pct": 91.8, "branch_pct": 86.5 }
+  },
+  "bundle_size": {
+    "initial_html_gz_bytes": 809,
+    "initial_css_gz_bytes": 9707,
+    "vendor_react_gz_bytes": 67276,
+    "vendor_icons_gz_bytes": 7290,
+    "vendor_motion_gz_bytes": 757,
+    "index_app_gz_bytes": 82022,
+    "total_initial_js_gz_kb": 154.17,
+    "budget_ceiling_kb": 170.0
+  },
+  "accessibility": {
+    "contrast_pairs_tested": 13,
+    "contrast_pairs_passed": 13,
+    "min_contrast_ratio": 4.73,
+    "target_contrast_ratio": 4.5,
+    "axe_violations": {
+      "/today": 0,
+      "/forecast": 0,
+      "/household": 0,
+      "/learn": 0,
+      "/audit": 0,
+      "/emergency": 0
+    }
+  },
+  "latency_and_throughput": {
+    "route": "/api/engines/plan",
+    "cold_latency_ms": 40.77,
+    "p50_latency_ms": 1.24,
+    "p95_latency_ms": 4.36,
+    "p99_latency_ms": 6.82,
+    "throughput_req_sec": 573.0,
+    "error_rate_pct": 0.0,
+    "monte_carlo_cache_hit_rate_pct": 98.91,
+    "air_quality_cache_hit_rate_pct": 99.01
+  },
+  "code_hygiene": {
+    "source_files_over_300_lines": 0,
+    "ui_components_over_250_lines": 0,
+    "cyclomatic_complexity_max": 9,
+    "typescript_strict": true,
+    "any_type_violations": 0,
+    "ts_ignore_count": 0
+  }
+}
