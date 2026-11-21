@@ -1,0 +1,62 @@
+NIRVAAT ENGINEERING & PERFORMANCE BASELINE
+Date: 2026-11-22T01:56:00+05:30
+Commit: 83b98c7
+
+======================================================================
+1. TYPECHECK & LINT
+======================================================================
+pnpm run lint (tsc --noEmit): PASS (0 errors, 0 warnings)
+
+======================================================================
+2. AUTOMATED TEST SUITE
+======================================================================
+pnpm test:
+  Total Tests: 54
+  Passed: 54
+  Failed: 0
+  Skipped: 0
+  Duration: 4077 ms (4.08s)
+
+======================================================================
+3. ACCESSIBILITY & CONTRAST
+======================================================================
+pnpm run test:contrast:
+  Pairs Audited: 13 glassmorphism & UI element pairs
+  Minimum Contrast: 4.73:1 (Target >= 4.5:1 / 3:1)
+  WCAG AA/AAA: 100% PASS
+
+======================================================================
+4. PRODUCTION BUNDLE SIZES
+======================================================================
+pnpm run build (Vite 8.3.8 / Rolldown):
+  dist/index.html:                           1.79 kB │ gzip:  0.79 kB
+  dist/assets/index-BWhSMIR1.css:           52.88 kB │ gzip:  9.48 kB
+  dist/assets/rolldown-runtime-BWaJ3C7D.js:  0.91 kB │ gzip:  0.51 kB
+  dist/assets/vendor-motion-DiHWOTim.js:     1.27 kB │ gzip:  0.74 kB
+  dist/assets/vendor-icons-BXMyTGoW.js:     18.79 kB │ gzip:  7.12 kB
+  dist/assets/vendor-react-Rd_v_38b.js:    210.53 kB │ gzip: 65.70 kB
+  dist/assets/index-CEXN_Cw2.js:           282.43 kB │ gzip: 80.10 kB
+  Total Initial JS Gzip:                   154.17 kB (< 170 kB budget)
+
+======================================================================
+5. LATENCY & THROUGHPUT BENCHMARKS
+======================================================================
+pnpm run benchmark:
+  Single Action (Cold, 300 draws): 12.14 ms
+  Single Action (Warm cache hit):   0.098 ms (124.2x speedup)
+  CRN 8-Action Batch (Cold):       22.61 ms
+  CRN 8-Action Batch (Warm hit):   0.075 ms (302.6x speedup)
+
+  /api/engines/plan (Deterministic Planner):
+    Cold Latency:    40.77 ms (HTTP 200, data_status=tier_A)
+    Warm Requests:   100 sequential runs
+    Throughput:      573.1 req/sec
+    p50 (Median):    1.24 ms
+    p90:             3.20 ms
+    p95:             4.36 ms (< 5 ms budget)
+    p99:             9.27 ms
+    Min / Max:       1.02 ms / 9.27 ms
+
+  Cache Hit Rates:
+    Monte Carlo:     98.91% (815 hits, 9 misses)
+    Air Quality:     99.01% (100 hits, 1 miss)
