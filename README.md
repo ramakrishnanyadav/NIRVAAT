@@ -3,7 +3,7 @@
 <div align="center">
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/ramakrishnanyadav/NIRVAAT/main/public/nirvaat-icon.svg" alt="NIRVAAT Logo" width="110" height="110" onerror="this.src='https://api.iconify.design/lucide:wind.svg?color=%2310b981&width=110&height=110'" />
+  <img src="https://api.iconify.design/lucide:wind.svg?color=%2310b981&width=96&height=96" alt="NIRVAAT Logo" width="96" height="96" />
 </p>
 
 ### *Physics-Grounded, Equity-First Air Quality Exposure Copilot*
@@ -246,7 +246,7 @@ $$V \frac{dC}{dt} = P \lambda V C_{\text{out}} + S - \left(\lambda + k + \frac{\
 - $\text{CADR}$: Clean Air Delivery Rate ($\text{m}^3/\text{h}$)
 
 ### 2. Monte Carlo Uncertainty Sampling with Common Random Numbers (CRN)
-- **Variance Attribution**: Decomposes simulation uncertainty into dynamic percentages ($\sum \text{variance\_share} = 100\%$) indicating whether infiltration ($\lambda$), deposition ($k$), or source strength ($S$) is the primary uncertainty driver.
+- **Variance Attribution**: Decomposes simulation uncertainty into dynamic percentages ($\sum \text{variance share} = 100\%$) indicating whether infiltration ($\lambda$), deposition ($k$), or source strength ($S$) is the primary uncertainty driver.
 - **Common Random Numbers (CRN)**: Evaluates baseline and counterfactual scenarios on identical random seed trajectories, ensuring interventions never display paradoxical outcomes (e.g., weatherstripping never artificially worsens indoor air).
 - **Memoized Latency**: Repeated parameter signatures evaluate from LRU cache in $<0.1\text{ms}$.
 
@@ -433,7 +433,7 @@ NIRVAAT adheres to complete transparency regarding its mathematical models and b
 > 2. **Single-Zone Mass-Balance Scope**: Assumes a well-mixed uniform zone volume. It does not simulate inter-room micro-plumes or pressure differentials.
 > 3. **Fine Particulate ($\text{PM}_{2.5}$) Scope**: Specifically models submicron fine particulate matter. It does not measure or simulate Ozone ($O_3$), Carbon Monoxide ($CO$), or Nitrogen Oxides ($NO_x$).
 > 4. **Not a Certified Medical Device**: NIRVAAT provides environmental exposure harm-reduction advice. It does not diagnose pulmonary conditions, prescribe medications, or replace professional clinical care.
-> 5. **Peer-Reviewed Scientific Foundations**: Physics priors are derived from peer-reviewed aerosol literature (Singer et al., EPA Exposure Factors Handbook, WHO Global Air Quality Guidelines) with dynamic Monte Carlo variance attribution ($\sum \text{variance\_share} = 100\%$).
+> 5. **Peer-Reviewed Scientific Foundations**: Physics priors are derived from peer-reviewed aerosol literature (Singer et al., EPA Exposure Factors Handbook, WHO Global Air Quality Guidelines) with dynamic Monte Carlo variance attribution ($\sum \text{variance share} = 100\%$).
 > 6. **Zero Invented Statistics**: Every numeric range, percentage, and reduction claim originates directly from deterministic tool execution envelopes audited by the server-side $V1 - V8$ verifier before display.
 
 ---

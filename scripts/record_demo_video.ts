@@ -1,7 +1,7 @@
 import { chromium } from '@playwright/test';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -165,7 +165,9 @@ async function runDemoRecording() {
   console.log('[Demo Recorder] Demo recording complete! Video file saved in demo_video/');
 }
 
-runDemoRecording().catch((err) => {
+try {
+  await runDemoRecording();
+} catch (err) {
   console.error('[Demo Recorder Error]:', err);
   process.exit(1);
-});
+}

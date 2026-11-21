@@ -95,11 +95,12 @@ export const AuditAndSettingsView: React.FC<AuditAndSettingsViewProps> = ({
 
             <label className="flex items-center justify-between gap-4 border-t border-slate-200/70 pt-3 cursor-pointer">
               <div>
-                <p className="font-semibold text-slate-800">Reduce Motion</p>
-                <p className="text-slate-600">Pauses breathing orb and smooth transitions.</p>
+                <span className="font-semibold text-slate-800 block">Reduce Motion</span>
+                <span className="text-slate-600 block">Pauses breathing orb and smooth transitions.</span>
               </div>
               <input
                 type="checkbox"
+                aria-label="Reduce Motion"
                 checked={reduceMotion}
                 onChange={onToggleReduceMotion}
                 className="h-4 w-4 accent-teal-700"
@@ -108,11 +109,12 @@ export const AuditAndSettingsView: React.FC<AuditAndSettingsViewProps> = ({
 
             <label className="flex items-center justify-between gap-4 border-t border-slate-200/70 pt-3 cursor-pointer">
               <div>
-                <p className="font-semibold text-slate-800">High Contrast Surfaces</p>
-                <p className="text-slate-600">Replaces translucent glass with crisp solid borders.</p>
+                <span className="font-semibold text-slate-800 block">High Contrast Surfaces</span>
+                <span className="text-slate-600 block">Replaces translucent glass with crisp solid borders.</span>
               </div>
               <input
                 type="checkbox"
+                aria-label="High Contrast Surfaces"
                 checked={highContrast}
                 onChange={onToggleHighContrast}
                 className="h-4 w-4 accent-teal-700"

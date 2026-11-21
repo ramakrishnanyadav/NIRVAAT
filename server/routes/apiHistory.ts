@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router, Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { SavedDecisionRecord } from '@nirvaat/contracts';
@@ -56,7 +57,7 @@ router.post('/', (req: Request, res: Response, next: NextFunction) => {
     }
 
     const record: SavedDecisionRecord = {
-      id: parsed.data.id || `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      id: parsed.data.id || `rec_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
       query: parsed.data.query,
       region_label: parsed.data.region_label,
       channel: parsed.data.channel,

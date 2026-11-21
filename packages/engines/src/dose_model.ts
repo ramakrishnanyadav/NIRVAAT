@@ -86,8 +86,7 @@ export function computeInhaledDose(input: DoseCalculationInput): {
     return { dailyDoseUg: 0, overnightDoseUg: 0, timeWeightedConc: 0, pediatricMaskBlocked: false };
   }
 
-  for (let i = 0; i < slots.length; i++) {
-    const slot = slots[i];
+  for (const slot of slots) {
     const hIdx = slot.hour_index;
     const cIn = Math.max(0, input.indoor_pm25_hourly[hIdx] ?? input.indoor_pm25_hourly[0] ?? 0);
     const cOut = Math.max(0, input.outdoor_pm25_hourly[hIdx] ?? input.outdoor_pm25_hourly[0] ?? 0);
@@ -144,8 +143,8 @@ export function reindexForecastByClockHour(
   startClockHour?: number,
   fallbackVal = 120
 ): number[] {
-  const aligned: number[] = Array(24).fill(fallbackVal);
-  const filled = Array(24).fill(false);
+  const aligned: number[] = new Array(24).fill(fallbackVal);
+  const filled = new Array(24).fill(false);
 
   if (!Array.isArray(pointsOrNumbers) || pointsOrNumbers.length === 0) {
     return aligned;
@@ -167,7 +166,7 @@ export function reindexForecastByClockHour(
       if (pt.time) {
         const timePart = pt.time.split('T')[1];
         if (timePart) {
-          const h = parseInt(timePart.split(':')[0], 10);
+          const h = Number.parseInt(timePart.split(':')[0], 10);
           if (!Number.isNaN(h) && h >= 0 && h < 24) {
             clockH = h;
           }

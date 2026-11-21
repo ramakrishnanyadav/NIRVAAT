@@ -33,8 +33,9 @@ const ALLOWED_ORIGINS = new Set([
 ]);
 
 export function corsMiddleware(req: Request, res: Response, next: NextFunction): void {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
+  const rawOrigin = req.headers.origin;
+  const origin = typeof rawOrigin === 'string' ? rawOrigin.trim() : undefined;
+  if (origin && /^https?:\/\/[a-zA-Z0-9.\-_:]+$/.test(origin) && ALLOWED_ORIGINS.has(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');

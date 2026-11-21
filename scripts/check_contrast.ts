@@ -15,32 +15,32 @@ function parseHex(hex: string): ColorRgb {
   const clean = hex.replace('#', '');
   if (clean.length === 3) {
     return {
-      r: parseInt(clean[0] + clean[0], 16),
-      g: parseInt(clean[1] + clean[1], 16),
-      b: parseInt(clean[2] + clean[2], 16),
+      r: Number.parseInt(clean[0] + clean[0], 16),
+      g: Number.parseInt(clean[1] + clean[1], 16),
+      b: Number.parseInt(clean[2] + clean[2], 16),
     };
   }
   return {
-    r: parseInt(clean.slice(0, 2), 16),
-    g: parseInt(clean.slice(2, 4), 16),
-    b: parseInt(clean.slice(4, 6), 16),
+    r: Number.parseInt(clean.slice(0, 2), 16),
+    g: Number.parseInt(clean.slice(2, 4), 16),
+    b: Number.parseInt(clean.slice(4, 6), 16),
   };
 }
 
 function parseRgba(rgbaStr: string): ColorRgb {
-  const match = rgbaStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+  const match = /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/.exec(rgbaStr);
   if (!match) throw new Error(`Cannot parse color: ${rgbaStr}`);
   return {
-    r: parseInt(match[1], 10),
-    g: parseInt(match[2], 10),
-    b: parseInt(match[3], 10),
-    a: match[4] !== undefined ? parseFloat(match[4]) : 1,
+    r: Number.parseInt(match[1], 10),
+    g: Number.parseInt(match[2], 10),
+    b: Number.parseInt(match[3], 10),
+    a: match[4] !== undefined ? Number.parseFloat(match[4]) : 1,
   };
 }
 
 /** Composite foreground over background using standard alpha blending */
 function compositeColor(fg: ColorRgb, bg: ColorRgb): ColorRgb {
-  const alpha = fg.a !== undefined ? fg.a : 1;
+  const alpha = fg.a ?? 1;
   return {
     r: Math.round(fg.r * alpha + bg.r * (1 - alpha)),
     g: Math.round(fg.g * alpha + bg.g * (1 - alpha)),

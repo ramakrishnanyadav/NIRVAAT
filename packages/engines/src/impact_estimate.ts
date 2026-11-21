@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { AgeBand, HouseholdProfile, ToolEnvelope, ConfidenceLevel } from '@nirvaat/contracts';
-import { ActionId, ActionDefinition, ACTION_LIBRARY } from './action_library.ts';
+import { ActionId } from './action_library.ts';
 import { HourlyScheduleSlot, computeInhaledDose, reindexForecastByClockHour } from './dose_model.ts';
 import { solveIndoorMassBalance } from './indoor_model.ts';
 import { PARAMETER_PRIORS, PRIORS_VERSION, ROOM_VOLUME_PRIORS, COOKING_SCHEDULE_PRIORS } from './priors.ts';
@@ -38,8 +38,8 @@ export interface ImpactEstimateValue extends Record<string, unknown> {
 export function createRng(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
-    state |= 0;
-    state = (state + 0x6d2b79f5) | 0;
+    state = Math.trunc(state);
+    state = Math.trunc(state + 0x6d2b79f5);
     let t = Math.imul(state ^ (state >>> 15), 1 | state);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
@@ -195,14 +195,14 @@ export function impactEstimate(
     });
 
     const baseSourceArr = forecast.map((_, h) => (COOKING_SCHEDULE_PRIORS.peak_hours.includes(h) ? sCook : 0));
-    const baseCadr =
-      input.action === 'run_purifier_presleep' || input.action === 'diy_filter'
-        ? 0
-        : input.profile.home.purifier.has && input.profile.home.purifier.type === 'hepa'
-          ? (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 300) * derateHepa
-          : input.profile.home.purifier.has && input.profile.home.purifier.type === 'diy_cr_box'
-            ? (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 280) * derateDiy
-            : 0;
+    let baseCadr = 0;
+    if (input.action !== 'run_purifier_presleep' && input.action !== 'diy_filter' && input.profile.home.purifier.has) {
+      if (input.profile.home.purifier.type === 'hepa') {
+        baseCadr = (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 300) * derateHepa;
+      } else if (input.profile.home.purifier.type === 'diy_cr_box') {
+        baseCadr = (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 280) * derateDiy;
+      }
+    }
 
     let withP = pBase;
     const withLamArr = [...baseLamArr];
@@ -339,7 +339,12 @@ export function impactEstimate(
     (input.action === 'diy_filter' && PARAMETER_PRIORS.cadr_derating_diy?.status === 'assumed') ||
     (input.action === 'n95_on_commute' && input.target_member_age_band !== 'adult' && PARAMETER_PRIORS.mask_n95_fit_child?.status === 'assumed');
   const hasAssumed = isAssumedData || actionAssumedPrior;
-  const confidence: ConfidenceLevel = (spread <= 14 && !hasAssumed) ? 'high' : (spread <= 28) ? 'medium' : 'low';
+  let confidence: ConfidenceLevel = 'low';
+  if (spread <= 14 && !hasAssumed) {
+    confidence = 'high';
+  } else if (spread <= 28) {
+    confidence = 'medium';
+  }
 
   const topUncertainties = deriveSensitivityDrivers(input.action, sampleRecords, dPctS);
 

@@ -1,24 +1,16 @@
 import {
-  AirQualitySummary,
-  GuidanceEntry,
   RuntimeContext,
   ToolCallTrace,
 } from '@nirvaat/contracts';
 import {
-  reindexForecastByClockHour,
   impactEstimate,
   WORKED_SCENARIOS,
   ImpactEstimateInput,
 } from '@nirvaat/engines';
 import {
   fetchLiveAirQualitySummary,
-  getAqCacheSize,
-  getAqMetrics,
-  resetAqMetrics,
-  clearAqCache,
-  roundCoarseCoord,
 } from './openMeteoClient.ts';
-import { PRESET_REGIONS, GUIDANCE_LIBRARY } from './guidanceRegistry.ts';
+import { GUIDANCE_LIBRARY } from './guidanceRegistry.ts';
 
 export {
   fetchLiveAirQualitySummary,
@@ -27,10 +19,10 @@ export {
   resetAqMetrics,
   clearAqCache,
   roundCoarseCoord,
-  PRESET_REGIONS,
-  GUIDANCE_LIBRARY,
-  reindexForecastByClockHour,
-};
+} from './openMeteoClient.ts';
+
+export { PRESET_REGIONS, GUIDANCE_LIBRARY } from './guidanceRegistry.ts';
+export { reindexForecastByClockHour } from '@nirvaat/engines';
 
 function makeToolRef(prefix: string): string {
   const rand = Math.random().toString(36).slice(2, 7);
@@ -201,7 +193,7 @@ export async function executeNirvaatTool(
       };
     }
 
-    const action = String(rawArgs.action_type || 'seal_gaps') as any;
+    const action = (typeof rawArgs.action_type === 'string' ? rawArgs.action_type : 'seal_gaps') as any;
     const outdoorPm25 = Number(rawArgs.outdoor_pm25 || 250);
     const hourlyForecast = Array.from({ length: 24 }, () => outdoorPm25);
 
@@ -252,7 +244,7 @@ export async function executeNirvaatTool(
 
   // retrieve_guidance
   const callId = makeToolRef('gui');
-  const topic = String(rawArgs.topic || '').toLowerCase();
+  const topic = (typeof rawArgs.topic === 'string' ? rawArgs.topic : '').toLowerCase();
   const matched = GUIDANCE_LIBRARY.filter(
     (g) => g.topic.toLowerCase().includes(topic) || g.sensitive_groups.some((sg) => topic.includes(sg))
   );

@@ -176,7 +176,8 @@ export async function fetchLiveAirQualitySummary(
     const ageMin = 0;
     const times = raw.hourly?.time ?? [];
     if (times.length > 0) {
-      console.log('[Open-Meteo Telemetry] hourly.time[0]:', times[0]);
+      const sanitizedTime = String(times[0]).replace(/[\r\n]/g, '');
+      console.log('[Open-Meteo Telemetry] hourly.time[0]:', sanitizedTime);
     }
     const hourlyPm25 = raw.hourly?.pm2_5 ?? [];
     const hourlyPm10 = raw.hourly?.pm10 ?? [];

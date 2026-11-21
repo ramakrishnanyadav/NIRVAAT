@@ -157,7 +157,7 @@ async function runBenchmarks() {
   // Mock Open-Meteo upstream during benchmark
   const originalFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const urlStr = String(input);
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : (input as Request).url;
     if (urlStr.includes('open-meteo.com')) {
       const mockPayload = {
         current: {
@@ -193,7 +193,8 @@ async function runBenchmarks() {
   const coldHttpDuration = performance.now() - coldHttpStart;
   const coldJson = await coldRes.json();
 
-  console.log(`  - Cold /api/engines/plan latency: ${coldHttpDuration.toFixed(2)} ms (HTTP ${coldRes.status}, data_status=${coldJson.plan?.data_status})`);
+  const sanitizedStatus = String(coldJson.plan?.data_status ?? '').replace(/[\r\n]/g, '');
+  console.log(`  - Cold /api/engines/plan latency: ${coldHttpDuration.toFixed(2)} ms (HTTP ${coldRes.status}, data_status=${sanitizedStatus})`);
 
   // 100 Warm Requests
   console.log('\n  Sending 100 sequential warm requests to measure distribution...');
@@ -239,7 +240,9 @@ async function runBenchmarks() {
   console.log('='.repeat(70));
 }
 
-runBenchmarks().catch((err) => {
+try {
+  await runBenchmarks();
+} catch (err) {
   console.error('Benchmark failed:', err);
   process.exit(1);
-});
+}

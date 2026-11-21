@@ -2,12 +2,13 @@ export interface BannedAdviceRule {
   rule: string;
   rx: RegExp;
   fix: string;
+  test?: (text: string) => boolean;
 }
 
 export const BANNED_ADVICE_REGEXES: BannedAdviceRule[] = [
   {
     rule: 'V3_NO_MEDICATION_CHANGE',
-    rx: /(?:stop|discontinue|cease|alter|change|taper|skip|adjust|increase|raise|double|modify)\s+(?:your\s+|the\s+)?(?:inhaler|medication|medicine|steroid|prescription|(?:medicine|steroid|inhaler)\s+dose|dose\s+of\s+(?:your\s+)?(?:medication|medicine|steroid|inhaler))|(?:reduce\s+(?:your\s+|the\s+)?(?:inhaler|medication|medicine|steroid|prescription|(?:medicine|steroid|inhaler)\s+dose|dose\s+of\s+(?:your\s+)?(?:medication|medicine|steroid|inhaler)))/i,
+    rx: /\b(?:stop|discontinue|cease|alter|change|taper|skip|adjust|increase|raise|double|modify|reduce)\s+(?:your\s+|the\s+)?(?:dose\s+of\s+)?(?:inhaler|medication|medicine|steroid|prescription)(?:\s+dose)?\b/i,
     fix: 'Never advise modifying or stopping clinical medications; tell user to follow existing asthma action plan.',
   },
   {
@@ -22,7 +23,14 @@ export const BANNED_ADVICE_REGEXES: BannedAdviceRule[] = [
   },
   {
     rule: 'V3_NO_MASK_UNDER_2',
-    rx: /(?<!(?:do\s+not|never|avoid|not|don't)\s+(?:use\s+|put\s+|wear\s+|place\s+)?)(?:put\s+(?:an?\s+)?(?:n95|kn95|mask)|wear\s+(?:an?\s+)?(?:n95|kn95|mask)|mask\s+on)\s+(?:on\s+)?(?:your\s+|the\s+)?(?:infant|baby|newborn|toddler\s+under\s+2|child\s+under\s+2)/i,
+    rx: /\b(?:put|wear|place|use|mask\s+on)\s+(?:an?\s+)?(?:n95|kn95|mask)\s+(?:on|for)?\s*(?:your\s+|the\s+)?(?:infant|baby|newborn|toddler\s+under\s+2|child\s+under\s+2)\b/i,
+    test: (text: string) => {
+      const match = /\b(?:put|wear|place|use|mask\s+on)\s+(?:an?\s+)?(?:n95|kn95|mask)\s+(?:on|for)?\s*(?:your\s+|the\s+)?(?:infant|baby|newborn|toddler\s+under\s+2|child\s+under\s+2)\b/i.exec(text);
+      if (!match) return false;
+      const prefix = text.slice(Math.max(0, match.index - 35), match.index).toLowerCase();
+      if (/\b(?:do\s+not|never|avoid|not|don't)\s*$/i.test(prefix)) return false;
+      return true;
+    },
     fix: 'Masks for infants under age 2 present suffocation risk and are strictly forbidden.',
   },
 ];

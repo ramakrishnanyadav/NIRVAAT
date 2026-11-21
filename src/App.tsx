@@ -69,7 +69,7 @@ export default function App() {
       section: 'Run Decision',
       onSelect: () => {
         state.setQueryInput(sc.prompt);
-        state.submitPlanQuery(sc.prompt);
+        void state.submitPlanQuery(sc.prompt);
       },
     })),
   ];
@@ -217,7 +217,7 @@ export default function App() {
             onReplyClarify={(ans) => {
               const combined = `${state.lastSubmittedQuery}\nAdditional detail: ${ans}`;
               state.setQueryInput(combined);
-              state.submitPlanQuery(combined);
+              void state.submitPlanQuery(combined);
             }}
             guidanceEntries={state.guidanceEntries}
           />

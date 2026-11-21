@@ -29,8 +29,15 @@ export const RED_FLAG_PATTERNS: RegExp[] = [
   /(खांसी में खून|खून की खांसी)/,
 
   // 5. Severe breathlessness / asphyxia / suffocation
-  /\b(severe\s+breathlessness|worsening\s+breathlessness|diff?iculty\s+breathing|shortness\s+of\s+breath|gasping\s+for\s+air|struggling\s+to\s+breathe|cannot\s+breathe|can['’]t\s+breathe?|cant\s+breathe?|unable\s+to\s+breathe)\b/i,
-  /\b(saans\s+(?:nahi|nahin)\s+(?:aa\s+rahi|le\s+p[a|aa]\s+rah[ai]|le\s+sak)|saans\s+phool\s+rahi|saans\s+lene\s+(?:me|mein)\s+.{0,25}(?:takleef|dikkat|mushkil)|dum\s+ghut(?: raha)?)\b/i,
+  /\b(?:severe|worsening)\s+breathlessness\b/i,
+  /\bdiff?iculty\s+breathing\b/i,
+  /\bshortness\s+of\s+breath\b/i,
+  /\b(?:gasping\s+for\s+air|struggling\s+to\s+breathe)\b/i,
+  /\b(?:cannot|can['’]?t|cant|unable\s+to)\s+breathe?\b/i,
+  /\bsaans\s+(?:nahi|nahin)\s+(?:aa\s+rahi|le\s+pa?\s+rah[ai]|le\s+sak)\b/i,
+  /\bsaans\s+phool\s+rahi\b/i,
+  /\bsaans\s+lene\s+(?:me|mein)\s+.{0,25}(?:takleef|dikkat|mushkil)\b/i,
+  /\bdum\s+ghut(?: raha)?\b/i,
   /((?:सांस|साँस)\s*(?:लेने में\s*.{0,25}(?:तकलीफ|दिक्कत|कठिनाई|परेशानी)|नहीं आ रही|नहीं ले पा|फूल रही)|दम\s*घुट)/,
 
   // 6. Pediatric respiratory distress (nostril flaring, intercostal retractions, Hinglish + Devanagari)
@@ -39,8 +46,8 @@ export const RED_FLAG_PATTERNS: RegExp[] = [
   /(बच्चे|शिशु|बच्चा).{0,30}(?:पसलियां धंस|सांस फूल|सांस लेने में|सांस नहीं)/,
 
   // 7. Unrelieved wheezing with inhaler
-  /\b(wheeze|wheezing).{0,40}\b(not\s+settling|not\s+responding|still\s+bad|worse\s+after|theek\s+nahi|shant\s+nahi).{0,25}\b(inhaler|reliever|nebulizer|pump)\b/i,
-  /\b(inhaler|reliever|nebulizer|pump)\b.{0,35}\b(?:ke\s+baad\s+bhi|after).{0,25}\b(?:wheeze|saans)\b/i,
+  /\bwheezing?\b.{0,40}\b(?:not\s+settling|not\s+responding|still\s+bad|worse\s+after|theek\s+nahi|shant\s+nahi)\b.{0,25}\b(?:inhaler|reliever|nebulizer|pump)\b/i,
+  /\b(?:inhaler|reliever|nebulizer|pump)\b.{0,35}\b(?:ke\s+baad\s+bhi|after).{0,25}\b(?:wheeze|saans)\b/i,
   /(?:इनहेलर|पंप).{0,30}(?:के बाद भी|शांत नहीं).{0,20}(?:सांस|घरघराहट)/,
 
   // 8. Acute neurological confusion / altered sensorium (never bare 'confusion')

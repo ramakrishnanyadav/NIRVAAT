@@ -1,20 +1,17 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cookieParser from 'cookie-parser';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import dotenv from 'dotenv';
 import {
   helmetMiddleware,
   corsMiddleware,
   timeoutMiddleware,
   sessionMiddleware,
-  checkRateLimit,
-  resetRateLimits,
-  getRateLimitRetryAfter,
 } from './server/middleware/security.ts';
 import { errorHandler } from './server/middleware/errorHandler.ts';
 import planRoutes from './server/routes/apiPlan.ts';
-import historyRoutes, { getSessionHistoryMap } from './server/routes/apiHistory.ts';
+import historyRoutes from './server/routes/apiHistory.ts';
 import telemetryRoutes from './server/routes/apiTelemetry.ts';
 
 dotenv.config();
@@ -23,10 +20,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const app = express();
+app.disable('x-powered-by');
 export const PORT = Number(process.env.PORT ?? 3000);
 
 // Re-export helpers for test harness compatibility
-export { checkRateLimit, resetRateLimits, getRateLimitRetryAfter, getSessionHistoryMap };
+export { checkRateLimit, resetRateLimits, getRateLimitRetryAfter } from './server/middleware/security.ts';
+export { getSessionHistoryMap } from './server/routes/apiHistory.ts';
 
 // 1. Request body deserialization with strict 64kb limit
 app.use(express.json({ limit: '64kb' }));
@@ -86,8 +85,10 @@ const isDirectRun = Boolean(
 );
 
 if (!isTestRun && isDirectRun) {
-  startServer().catch((err) => {
+  try {
+    await startServer();
+  } catch (err) {
     console.error('Fatal startup error:', err);
     process.exit(1);
-  });
+  }
 }

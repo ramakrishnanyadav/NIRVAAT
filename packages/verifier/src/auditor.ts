@@ -181,7 +181,8 @@ export function auditDraftPlan(
     safety: draft.safety_note,
   });
   for (const ban of BANNED_ADVICE_REGEXES) {
-    if (ban.rx.test(serializedText)) {
+    const isViolated = ban.test ? ban.test(serializedText) : ban.rx.test(serializedText);
+    if (isViolated) {
       violations.push({
         rule: ban.rule,
         field: 'actions / safety_note',

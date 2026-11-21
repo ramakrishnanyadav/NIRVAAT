@@ -101,7 +101,7 @@ router.post('/engines/plan', async (req: Request, res: Response, next: NextFunct
 
   if (aqRes.ok && aqRes.data.hourly_forecast && aqRes.data.hourly_forecast.length >= 12) {
     if (aqRes.data.hourly_forecast[0]?.time) {
-      const parsedHour = parseInt(aqRes.data.hourly_forecast[0].time.split('T')[1]?.split(':')[0] ?? '', 10);
+      const parsedHour = Number.parseInt(aqRes.data.hourly_forecast[0].time.split('T')[1]?.split(':')[0] ?? '', 10);
       if (!Number.isNaN(parsedHour)) startHour = parsedHour;
     }
     const rawHourly = aqRes.data.hourly_forecast.map((p) => p.pm2_5 ?? aqRes.data.pm2_5 ?? 120);
@@ -190,7 +190,7 @@ router.post('/engines/plan', async (req: Request, res: Response, next: NextFunct
     assumptions: [
       isHindi
         ? `${priorityMember.label} को प्राथमिकता देते हुए आपके घर के आकार (${rt.profile.home.size_band}) के लिए गणना की गई।`
-        : `Prioritized ${priorityMember.label}; modeled for ${rt.profile.home.size_band.replace(/_/g, ' ')} dwelling.`,
+        : `Prioritized ${priorityMember.label}; modeled for ${rt.profile.home.size_band.replaceAll('_', ' ')} dwelling.`,
     ],
     actions: scoredEnv.value.top_actions.map((item) => ({
       rank: item.rank,

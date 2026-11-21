@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Shield, Building2, School, AlertTriangle, Sparkles, CheckCircle2, Lock } from 'lucide-react';
+import { Users, Building2, School, AlertTriangle, Sparkles, CheckCircle2, Lock } from 'lucide-react';
 import { RouteErrorBoundary } from '../shared/ui/RouteErrorBoundary';
 import { RegionConfig } from '../shared/nirvaatTypes';
 import { UiStrings } from '../i18n/strings';
@@ -50,7 +50,7 @@ export const CommunityRoute: React.FC<CommunityRouteProps> = ({ selectedRegion, 
           </div>
 
           <div className="rounded-xl border border-teal-100 bg-teal-50/70 p-3.5 text-xs text-slate-700 leading-relaxed">
-            <strong className="font-semibold text-teal-950">Differential Privacy &amp; Anti-Targeting Guarantee: </strong>
+            <strong className="font-semibold text-teal-950">Differential Privacy &amp; Anti-Targeting Guarantee:</strong>{' '}
             To protect individual household habits, cooking schedules, and dwelling tightness from re-identification,
             community aggregate statistics are only rendered when at least 5 verified households in a micro-grid participate.
             Participating in this micro-grid: <strong className="text-teal-900 font-bold">{participatingCount} households ({participatingCount * 4} residents)</strong>.

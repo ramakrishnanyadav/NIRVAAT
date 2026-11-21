@@ -12,7 +12,7 @@ interface State {
 }
 
 export class RouteErrorBoundary extends Component<Props, State> {
-  public state: State = {
+  public override readonly state: State = {
     hasError: false,
   };
 

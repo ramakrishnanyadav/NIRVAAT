@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Leaf, Users, ShieldAlert, Award, ChevronDown, ChevronUp } from 'lucide-react';
+import { Leaf, Users, Award, ChevronDown, ChevronUp } from 'lucide-react';
 import { SUSTAINABLE_ALTERNATIVES, SustainableAlternative } from '../../shared/nirvaatTypes';
 import { UiStrings } from '../../i18n/strings';
 

@@ -67,7 +67,7 @@ export function solveIndoorMassBalance(params: IndoorHourlyParams): {
   const sourceParam = params.source_ug_per_hr ?? params.indoor_source_hourly ?? 0;
 
   const getAt = (arrOrScalar: number | number[], idx: number): number =>
-    Array.isArray(arrOrScalar) ? (arrOrScalar[idx] ?? arrOrScalar[arrOrScalar.length - 1] ?? 0) : arrOrScalar;
+    Array.isArray(arrOrScalar) ? (arrOrScalar[idx] ?? arrOrScalar.at(-1) ?? 0) : arrOrScalar;
 
   const firstLambda = Math.max(0.05, getAt(lambdaParam, 0));
   const firstCadr = Math.max(0, getAt(cadrParam, 0));
@@ -105,12 +105,14 @@ export function solveIndoorMassBalance(params: IndoorHourlyParams): {
 
   const mean = hourly.reduce((a, b) => a + b, 0) / hourly.length;
   // Overnight clock slice (22:00 to 06:00) when 24h curve provided, otherwise first 8 hours
-  const overnightSlice =
-    hourly.length === 24
-      ? [hourly[22], hourly[23], ...hourly.slice(0, 7)]
-      : hourly.length >= 8
-        ? hourly.slice(0, 8)
-        : hourly;
+  let overnightSlice: number[];
+  if (hourly.length === 24) {
+    overnightSlice = [hourly[22], hourly[23], ...hourly.slice(0, 7)];
+  } else if (hourly.length >= 8) {
+    overnightSlice = hourly.slice(0, 8);
+  } else {
+    overnightSlice = hourly;
+  }
   const overnightMean = overnightSlice.reduce((a, b) => a + b, 0) / overnightSlice.length;
   const peak = Math.max(...hourly);
 

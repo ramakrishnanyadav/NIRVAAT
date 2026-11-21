@@ -1,7 +1,7 @@
 import { FunctionDeclaration, Type } from '@google/genai';
 import {
   DataStatusTier,
-  NirvaatPlanResponse,
+  NirvaatPlan,
   NirvaatPlanResponseSchema,
   RuntimeContext,
   ToolCallTrace,
@@ -13,15 +13,10 @@ import {
 } from '@nirvaat/verifier';
 import { sanitizeUserQuery, SYSTEM_INSTRUCTIONS_PROD } from '@nirvaat/prompts';
 import { executeNirvaatTool } from './nirvaatTools.ts';
-import {
-  MODEL_CONFIG,
-  getHealthyModel,
-  generateContentWithFallback,
-} from './modelConfig.ts';
+import { generateContentWithFallback } from './modelConfig.ts';
 
+export { MODEL_CONFIG, getHealthyModel } from './modelConfig.ts';
 export {
-  MODEL_CONFIG,
-  getHealthyModel,
   sanitizeUserQuery,
   auditDraftPlan,
   checkRedFlags,
@@ -31,7 +26,7 @@ export function detectRedFlagSymptom(query: string): boolean {
   return checkRedFlags(query).isRedFlag;
 }
 
-export function buildEmergencyResponse(runtime: RuntimeContext): NirvaatPlanResponse {
+export function buildEmergencyResponse(runtime: RuntimeContext): NirvaatPlan {
   const isHindi = runtime.locale.toLowerCase().startsWith('hi');
   return {
     language: isHindi ? 'hi-IN' : 'en-IN',
@@ -138,24 +133,29 @@ export function buildSafeTemplateFallback(
   runtime: RuntimeContext,
   traces: ToolCallTrace[],
   expectedStatus: DataStatusTier
-): NirvaatPlanResponse {
+): NirvaatPlan {
   const isHindi = runtime.locale.toLowerCase().startsWith('hi');
   const aqTrace = traces.find((t) => t.tool_name === 'get_air_quality' && t.status === 'ok');
   const aqVal = aqTrace?.result.value as Record<string, unknown> | undefined;
   const pm25 = typeof aqVal?.pm2_5 === 'number' ? aqVal.pm2_5 : null;
+
+  let summaryText = '';
+  if (isHindi) {
+    summaryText = pm25 !== null
+      ? `वर्तमान PM2.5 ${pm25} ug/m3 है। कम लागत वाले सुरक्षित कदम अपनाएं।`
+      : `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${runtime.region.official_source} देखें।`;
+  } else {
+    summaryText = pm25 !== null
+      ? `Current grid PM2.5 is ${pm25} ug/m3. Focus on indoor clean air and timing.`
+      : `General guidance, no live data. Check ${runtime.region.official_source} for local updates.`;
+  }
 
   return {
     language: isHindi ? 'hi-IN' : 'en-IN',
     mode: 'plan',
     data_status: expectedStatus,
     situation: {
-      summary: isHindi
-        ? pm25 !== null
-          ? `वर्तमान PM2.5 ${pm25} ug/m3 है। कम लागत वाले सुरक्षित कदम अपनाएं।`
-          : `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${runtime.region.official_source} देखें।`
-        : pm25 !== null
-          ? `Current grid PM2.5 is ${pm25} ug/m3. Focus on indoor clean air and timing.`
-          : `General guidance, no live data. Check ${runtime.region.official_source} for local updates.`,
+      summary: summaryText,
       confidence: aqTrace ? 'medium' : 'low',
       sources: aqTrace ? [String(aqTrace.result.source ?? 'Open-Meteo')] : [runtime.region.official_source],
       as_of: new Date().toISOString(),
@@ -210,7 +210,7 @@ export async function runNirvaatCopilot(
   userQuery: string,
   runtime: RuntimeContext
 ): Promise<{
-  plan: NirvaatPlanResponse;
+  plan: NirvaatPlan;
   tool_traces: ToolCallTrace[];
   audit: AuditResult;
   model_used: string;
@@ -250,7 +250,12 @@ export async function runNirvaatCopilot(
 
   const hasAq = aqResult.trace.status === 'ok';
   const hasFc = fcResult.trace.status === 'ok';
-  const expectedStatus: DataStatusTier = hasAq && hasFc ? 'tier_A' : hasFc ? 'tier_B' : 'tier_C';
+  let expectedStatus: DataStatusTier = 'tier_C';
+  if (hasAq && hasFc) {
+    expectedStatus = 'tier_A';
+  } else if (hasFc) {
+    expectedStatus = 'tier_B';
+  }
 
   // 4. Generate plan via Gemini or fallback
   try {

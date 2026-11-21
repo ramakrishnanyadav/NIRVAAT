@@ -2,7 +2,7 @@ import { AgeBand, HouseholdProfile, ToolEnvelope, ConfidenceLevel } from '@nirva
 import { ActionId } from './action_library.ts';
 import { HourlyScheduleSlot, computeInhaledDose, reindexForecastByClockHour } from './dose_model.ts';
 import { solveIndoorMassBalance } from './indoor_model.ts';
-import { PARAMETER_PRIORS, PRIORS_VERSION, ROOM_VOLUME_PRIORS, COOKING_SCHEDULE_PRIORS } from './priors.ts';
+import { PARAMETER_PRIORS, PRIORS_VERSION, COOKING_SCHEDULE_PRIORS } from './priors.ts';
 import { quantile } from './sensitivity.ts';
 import {
   ImpactEstimateInput,
@@ -136,11 +136,14 @@ export function batchEvaluateActionsCRN(
     });
 
     const baseSourceArr = forecast.map((_, h) => (COOKING_SCHEDULE_PRIORS.peak_hours.includes(h) ? sCook : 0));
-    const baseCadr = input.profile.home.purifier.has && input.profile.home.purifier.type === 'hepa'
-      ? (input.profile.home.purifier.cadr_m3_hr ?? 300) * derateHepa
-      : input.profile.home.purifier.has && input.profile.home.purifier.type === 'diy_cr_box'
-        ? (input.profile.home.purifier.cadr_m3_hr ?? 280) * derateDiy
-        : 0;
+    let baseCadr = 0;
+    if (input.profile.home.purifier.has) {
+      if (input.profile.home.purifier.type === 'hepa') {
+        baseCadr = (input.profile.home.purifier.cadr_m3_hr ?? 300) * derateHepa;
+      } else if (input.profile.home.purifier.type === 'diy_cr_box') {
+        baseCadr = (input.profile.home.purifier.cadr_m3_hr ?? 280) * derateDiy;
+      }
+    }
 
     const baseIndoor = solveIndoorMassBalance({
       volume_m3: volume,
