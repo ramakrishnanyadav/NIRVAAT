@@ -11,33 +11,10 @@ export * from './sensitivity.ts';
 export { batchEvaluateActionsCRN } from './impact_crn.ts';
 export type { BatchImpactInput } from './impact_crn.ts';
 
-export interface ImpactEstimateInput {
-  profile: HouseholdProfile;
-  target_member_age_band: AgeBand;
-  schedule: HourlyScheduleSlot[];
-  action: ActionId;
-  forecast_pm25_hourly: number[];
-  start_clock_hour?: number;
-  seed?: number;
-  num_draws?: number;
-}
-
-export interface ImpactEstimateValue extends Record<string, unknown> {
-  action: ActionId;
-  daily_without_ug: { q10: number; median: number; q90: number };
-  daily_with_ug: { q10: number; median: number; q90: number };
-  daily_reduction_pct: { q10: number; median: number; q90: number };
-  overnight_without_ug: { q10: number; median: number; q90: number };
-  overnight_with_ug: { q10: number; median: number; q90: number };
-  overnight_reduction_pct: { q10: number; median: number; q90: number };
-  dose_avoided_median_ug: number;
-  top_uncertainties: SensitivityDriver[];
-  priors_version: string;
-}
-
-export {
+import {
   createRng,
   sampleTriangular,
+  samplePrior,
   getRoomVolumeM3,
   impactCache,
   MAX_IMPACT_CACHE_SIZE,
@@ -49,20 +26,13 @@ export {
   resetMonteCarloMetrics,
   clearImpactCache,
   computeImpactCacheKey,
+  buildSingleImpactEnvelope,
+  CachedImpactEntry,
+  ImpactEstimateInput,
+  ImpactEstimateValue,
 } from './sampling_helpers.ts';
-export type { CachedImpactEntry } from './sampling_helpers.ts';
 
-import {
-  createRng,
-  sampleTriangular,
-  getRoomVolumeM3,
-  impactCache,
-  MAX_IMPACT_CACHE_SIZE,
-  IMPACT_CACHE_TTL_MS,
-  recordMcHit,
-  recordMcMiss,
-  computeImpactCacheKey,
-} from './sampling_helpers.ts';
+export * from './sampling_helpers.ts';
 
 export function impactEstimate(
   input: ImpactEstimateInput,
@@ -112,26 +82,20 @@ export function impactEstimate(
   const sampleRecords: SampleRecord[] = [];
 
   for (let i = 0; i < draws; i++) {
-    const pBase = isLeaky
-      ? sampleTriangular(rng, PARAMETER_PRIORS.penetration_leaky.q10, PARAMETER_PRIORS.penetration_leaky.median, PARAMETER_PRIORS.penetration_leaky.q90)
-      : sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-    const pSealed = sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-
-    const lamDrafty = sampleTriangular(rng, PARAMETER_PRIORS.ach_drafty_closed.q10, PARAMETER_PRIORS.ach_drafty_closed.median, PARAMETER_PRIORS.ach_drafty_closed.q90);
-    const lamSealed = sampleTriangular(rng, PARAMETER_PRIORS.ach_sealed.q10, PARAMETER_PRIORS.ach_sealed.median, PARAMETER_PRIORS.ach_sealed.q90);
-    const lamOpen = sampleTriangular(rng, PARAMETER_PRIORS.ach_open_window.q10, PARAMETER_PRIORS.ach_open_window.median, PARAMETER_PRIORS.ach_open_window.q90);
-    const kDep = sampleTriangular(rng, PARAMETER_PRIORS.deposition_k.q10, PARAMETER_PRIORS.deposition_k.median, PARAMETER_PRIORS.deposition_k.q90);
-
-    const derateHepa = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_hepa.q10, PARAMETER_PRIORS.cadr_derating_hepa.median, PARAMETER_PRIORS.cadr_derating_hepa.q90);
-    const derateDiy = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_diy.q10, PARAMETER_PRIORS.cadr_derating_diy.median, PARAMETER_PRIORS.cadr_derating_diy.q90);
-
+    const pBase = isLeaky ? samplePrior(rng, PARAMETER_PRIORS.penetration_leaky) : samplePrior(rng, PARAMETER_PRIORS.penetration_sealed);
+    const pSealed = samplePrior(rng, PARAMETER_PRIORS.penetration_sealed);
+    const lamDrafty = samplePrior(rng, PARAMETER_PRIORS.ach_drafty_closed);
+    const lamSealed = samplePrior(rng, PARAMETER_PRIORS.ach_sealed);
+    const lamOpen = samplePrior(rng, PARAMETER_PRIORS.ach_open_window);
+    const kDep = samplePrior(rng, PARAMETER_PRIORS.deposition_k);
+    const derateHepa = samplePrior(rng, PARAMETER_PRIORS.cadr_derating_hepa);
+    const derateDiy = samplePrior(rng, PARAMETER_PRIORS.cadr_derating_diy);
     const sCook = input.profile.home.cooking_fuel === 'induction_electric'
       ? 900
-      : sampleTriangular(rng, PARAMETER_PRIORS.source_cooking_lpg.q10, PARAMETER_PRIORS.source_cooking_lpg.median, PARAMETER_PRIORS.source_cooking_lpg.q90);
-
+      : samplePrior(rng, PARAMETER_PRIORS.source_cooking_lpg);
     const maskFit = input.target_member_age_band === 'adult'
-      ? sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_adult.q10, PARAMETER_PRIORS.mask_n95_fit_adult.median, PARAMETER_PRIORS.mask_n95_fit_adult.q90)
-      : sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_child.q10, PARAMETER_PRIORS.mask_n95_fit_child.median, PARAMETER_PRIORS.mask_n95_fit_child.q90);
+      ? samplePrior(rng, PARAMETER_PRIORS.mask_n95_fit_adult)
+      : samplePrior(rng, PARAMETER_PRIORS.mask_n95_fit_child);
 
     const baseLamArr = forecast.map((_, h) => {
       if (input.profile.home.windows_habit === 'kept_open_night' && (h < 7 || h >= 21)) return lamOpen;
@@ -292,29 +256,22 @@ export function impactEstimate(
   }
 
   const topUncertainties = deriveSensitivityDrivers(input.action, sampleRecords, dPctS);
-
-  const envelope: ToolEnvelope<ImpactEstimateValue> = {
-    call_id: callId,
-    ok: true,
-    value: {
-      action: input.action,
-      daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
-      daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
-      daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
-      overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
-      overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
-      overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
-      dose_avoided_median_ug: Math.round((medWithout - medWith) * 10) / 10,
-      top_uncertainties: topUncertainties,
-      priors_version: PRIORS_VERSION,
-    },
-    unit: 'ug',
-    range: [quantile(dInS, 0.1), quantile(dInS, 0.9)],
+  const envelope = buildSingleImpactEnvelope(
+    callId,
+    input.action,
+    dOutS,
+    dInS,
+    dPctS,
+    nOutS,
+    nInS,
+    nPctS,
+    medWithout,
+    medWith,
+    topUncertainties,
     confidence,
-    source: `NIRVAAT Monte Carlo Impact Engine v${PRIORS_VERSION} (N=${draws} draws)`,
-    as_of: asOf,
-    notes: `${topUncertainties[0]?.plain_note ?? ''} Single-zone PM2.5 estimate; not a clinical risk score.`,
-  };
+    asOf,
+    draws
+  );
 
   if (impactCache.size >= MAX_IMPACT_CACHE_SIZE) {
     const oldestKey = impactCache.keys().next().value;

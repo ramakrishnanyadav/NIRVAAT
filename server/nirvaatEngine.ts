@@ -26,36 +26,12 @@ export function detectRedFlagSymptom(query: string): boolean {
   return checkRedFlags(query).isRedFlag;
 }
 
-export function buildEmergencyResponse(runtime: RuntimeContext): NirvaatPlan {
-  const isHindi = runtime.locale.toLowerCase().startsWith('hi');
-  return {
-    language: isHindi ? 'hi-IN' : 'en-IN',
-    mode: 'emergency',
-    data_status: 'tier_D',
-    situation: {
-      summary: isHindi
-        ? 'गंभीर श्वास लक्षणों की सूचना मिली है। तुरंत आपातकालीन चिकित्सा सहायता लें।'
-        : 'Potential urgent respiratory warning signs reported. Immediate medical care takes priority.',
-      confidence: 'high',
-      sources: ['NIRVAAT Red-Flag Safety Triage (H3)'],
-      as_of: new Date().toISOString(),
-    },
-    assumptions: [],
-    actions: [],
-    emergency: {
-      message: isHindi
-        ? `यह गंभीर लक्षण हो सकता है। अभी आपातकालीन चिकित्सा सहायता लें (${runtime.region.emergency_number} पर कॉल करें)। जब तक मदद न आए, व्यक्ति को घर के सबसे साफ कमरे में ले जाएं और उनके साथ रहें।`
-        : `I hear how worrying these symptoms are. Seek urgent medical care now by calling ${runtime.region.emergency_number}. While waiting, move to the cleanest available indoor room and stay with the person.`,
-      number: runtime.region.emergency_number,
-    },
-    safety_note: isHindi
-      ? 'यदि व्यक्ति पहले से निर्धारित रिलीवर इनहेलर का उपयोग कर रहा है, तो उसे पास रखें और तुरंत डॉक्टर या आपातकालीन सेवा से संपर्क करें।'
-      : 'Do not wait for air-quality advice when urgent breathing or chest symptoms are present.',
-    follow_up_hook: isHindi
-      ? 'व्यक्ति के सुरक्षित होने के बाद यदि आप चाहें तो हम घर की हवा को साफ रखने की योजना बना सकते हैं।'
-      : 'Once everyone is medically safe, reach back out if you want help reducing indoor smoke and smog.',
-  };
-}
+import {
+  buildEmergencyResponse,
+  buildSafeTemplateFallback,
+} from './routes/planResponseFormatters.ts';
+
+export { buildEmergencyResponse, buildSafeTemplateFallback };
 
 let activeGeminiCalls = 0;
 let dailyBudgetCount = 0;
@@ -128,83 +104,6 @@ const TOOL_DECLARATIONS: FunctionDeclaration[] = [
     },
   },
 ];
-
-export function buildSafeTemplateFallback(
-  runtime: RuntimeContext,
-  traces: ToolCallTrace[],
-  expectedStatus: DataStatusTier
-): NirvaatPlan {
-  const isHindi = runtime.locale.toLowerCase().startsWith('hi');
-  const aqTrace = traces.find((t) => t.tool_name === 'get_air_quality' && t.status === 'ok');
-  const aqVal = aqTrace?.result.value as Record<string, unknown> | undefined;
-  const pm25 = typeof aqVal?.pm2_5 === 'number' ? aqVal.pm2_5 : null;
-
-  let summaryText = '';
-  if (isHindi) {
-    summaryText = pm25 !== null
-      ? `वर्तमान PM2.5 ${pm25} ug/m3 है। कम लागत वाले सुरक्षित कदम अपनाएं।`
-      : `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${runtime.region.official_source} देखें।`;
-  } else {
-    summaryText = pm25 !== null
-      ? `Current grid PM2.5 is ${pm25} ug/m3. Focus on indoor clean air and timing.`
-      : `General guidance, no live data. Check ${runtime.region.official_source} for local updates.`;
-  }
-
-  return {
-    language: isHindi ? 'hi-IN' : 'en-IN',
-    mode: 'plan',
-    data_status: expectedStatus,
-    situation: {
-      summary: summaryText,
-      confidence: aqTrace ? 'medium' : 'low',
-      sources: aqTrace ? [String(aqTrace.result.source ?? 'Open-Meteo')] : [runtime.region.official_source],
-      as_of: new Date().toISOString(),
-    },
-    assumptions: [
-      isHindi
-        ? 'सुरक्षित टेम्पलेट योजना: घर के सबसे बंद कमरे को प्राथमिकता दी गई है।'
-        : 'Using safe baseline indoor protection assumptions for your household profile.',
-    ],
-    actions: [
-      {
-        rank: 1,
-        title: isHindi ? 'एक साफ कमरा बंद और सील रखें' : 'Keep one sleeping room closed and sealed',
-        when: isHindi ? 'शाम से सुबह 10 बजे तक' : 'Evening through 10:00 AM peak',
-        how: isHindi
-          ? 'बाहरी खिड़कियां बंद रखें और दरवाजे के नीचे की दरार को गीले तौलिये से ढक दें।'
-          : 'Keep exterior windows shut and place a rolled damp towel along bottom door gaps.',
-        why_it_works: isHindi
-          ? 'इससे बाहर का धुआं कमरे में धीरे प्रवेश करता है।'
-          : 'Cutting drafts slows smoky outdoor air from entering where your family sleeps.',
-        effect: {
-          metric: isHindi ? 'कमरे के अंदर PM2.5 प्रवेश' : 'Indoor PM2.5 infiltration',
-          with: null,
-          without: null,
-          change_range: 'moderate',
-          confidence: 'medium',
-          tool_ref: aqTrace?.call_id ?? 'safe_template',
-        },
-        cost: 'free',
-        evidence: 'moderate',
-        protects: ['general_household'],
-      },
-    ],
-    if_you_can_do_more: [
-      isHindi
-        ? 'यदि बजट हो तो सोने के कमरे में DIY या HEPA फिल्टर चलाएं।'
-        : 'Add DIY or HEPA filtration in the sealed room if budget allows.',
-    ],
-    myth_correction: isHindi
-      ? 'धुआं साफ करने के लिए कपूर या अगरबत्ती न जलाएं, इससे बारीक कण बढ़ते हैं।'
-      : 'Do not burn camphor or incense to cleanse air; combustion creates hazardous fine particles.',
-    safety_note: isHindi
-      ? 'यदि सांस फूलने या सीने में जकड़न के लक्षण हों, तो तुरंत आपातकालीन सहायता लें।'
-      : 'Seek immediate medical care if severe breathing distress occurs.',
-    follow_up_hook: isHindi
-      ? 'क्या आप दोपहर में खिड़कियां खोलने का सुरक्षित समय जानना चाहते हैं?'
-      : 'Would you like to check the cleanest afternoon window to ventilate your home?',
-  };
-}
 
 export async function runNirvaatCopilot(
   userQuery: string,

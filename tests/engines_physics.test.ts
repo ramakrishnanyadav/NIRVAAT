@@ -136,7 +136,7 @@ test('Physics Defect 4: variance_share_pct is dynamically computed and sums to 1
 
   const drivers = imp.value.top_uncertainties;
   assert.ok(drivers.length >= 1, 'Expected at least 1 uncertainty driver');
-  const sumVariance = drivers.reduce((acc, d) => acc + d.variance_share_pct, 0);
+  const sumVariance = drivers.reduce((acc: number, d) => acc + d.variance_share_pct, 0);
   assert.ok(
     Math.abs(sumVariance - 100) <= 2,
     `Variance shares must sum to ~100%, but summed to ${sumVariance}%`

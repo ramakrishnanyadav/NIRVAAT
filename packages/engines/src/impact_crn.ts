@@ -17,6 +17,7 @@ import {
   recordMcHit,
   recordMcMiss,
 } from './impact_estimate.ts';
+import { buildCrnActionEnvelope, samplePrior } from './sampling_helpers.ts';
 
 export interface BatchImpactInput {
   profile: HouseholdProfile;
@@ -108,25 +109,19 @@ export function batchEvaluateActionsCRN(
   const nightWithoutArr: number[] = [];
 
   for (let i = 0; i < draws; i++) {
-    const pBase = isLeaky
-      ? sampleTriangular(rng, PARAMETER_PRIORS.penetration_leaky.q10, PARAMETER_PRIORS.penetration_leaky.median, PARAMETER_PRIORS.penetration_leaky.q90)
-      : sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-    const pSealed = sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-
-    const lamDrafty = sampleTriangular(rng, PARAMETER_PRIORS.ach_drafty_closed.q10, PARAMETER_PRIORS.ach_drafty_closed.median, PARAMETER_PRIORS.ach_drafty_closed.q90);
-    const lamSealed = sampleTriangular(rng, PARAMETER_PRIORS.ach_sealed.q10, PARAMETER_PRIORS.ach_sealed.median, PARAMETER_PRIORS.ach_sealed.q90);
-    const lamOpen = sampleTriangular(rng, PARAMETER_PRIORS.ach_open_window.q10, PARAMETER_PRIORS.ach_open_window.median, PARAMETER_PRIORS.ach_open_window.q90);
-    const kDep = sampleTriangular(rng, PARAMETER_PRIORS.deposition_k.q10, PARAMETER_PRIORS.deposition_k.median, PARAMETER_PRIORS.deposition_k.q90);
-
-    const derateHepa = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_hepa.q10, PARAMETER_PRIORS.cadr_derating_hepa.median, PARAMETER_PRIORS.cadr_derating_hepa.q90);
-    const derateDiy = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_diy.q10, PARAMETER_PRIORS.cadr_derating_diy.median, PARAMETER_PRIORS.cadr_derating_diy.q90);
-
+    const pBase = isLeaky ? samplePrior(rng, PARAMETER_PRIORS.penetration_leaky) : samplePrior(rng, PARAMETER_PRIORS.penetration_sealed);
+    const pSealed = samplePrior(rng, PARAMETER_PRIORS.penetration_sealed);
+    const lamDrafty = samplePrior(rng, PARAMETER_PRIORS.ach_drafty_closed);
+    const lamSealed = samplePrior(rng, PARAMETER_PRIORS.ach_sealed);
+    const lamOpen = samplePrior(rng, PARAMETER_PRIORS.ach_open_window);
+    const kDep = samplePrior(rng, PARAMETER_PRIORS.deposition_k);
+    const derateHepa = samplePrior(rng, PARAMETER_PRIORS.cadr_derating_hepa);
+    const derateDiy = samplePrior(rng, PARAMETER_PRIORS.cadr_derating_diy);
     const sCook = input.profile.home.cooking_fuel === 'induction_electric'
       ? 900
-      : sampleTriangular(rng, PARAMETER_PRIORS.source_cooking_lpg.q10, PARAMETER_PRIORS.source_cooking_lpg.median, PARAMETER_PRIORS.source_cooking_lpg.q90);
-
-    const maskFitChild = sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_child.q10, PARAMETER_PRIORS.mask_n95_fit_child.median, PARAMETER_PRIORS.mask_n95_fit_child.q90);
-    const maskFitAdult = sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_adult.q10, PARAMETER_PRIORS.mask_n95_fit_adult.median, PARAMETER_PRIORS.mask_n95_fit_adult.q90);
+      : samplePrior(rng, PARAMETER_PRIORS.source_cooking_lpg);
+    const maskFitChild = samplePrior(rng, PARAMETER_PRIORS.mask_n95_fit_child);
+    const maskFitAdult = samplePrior(rng, PARAMETER_PRIORS.mask_n95_fit_adult);
 
     // Baseline (without actions) solved ONCE per draw
     const baseLamArr = forecast.map((_, h) => {
@@ -279,48 +274,7 @@ export function batchEvaluateActionsCRN(
   for (const act of missingActions) {
     recordMcMiss();
     const acc = actionAccs.get(act)!;
-    const dInS = [...acc.dailyWithArr].sort((a, b) => a - b);
-    const dPctS = [...acc.dailyPctArr].sort((a, b) => a - b);
-    const nInS = [...acc.nightWithArr].sort((a, b) => a - b);
-    const nPctS = [...acc.nightPctArr].sort((a, b) => a - b);
-
-    const medWith = quantile(dInS, 0.5);
-    let pctQ10 = quantile(dPctS, 0.1);
-    let pctMed = quantile(dPctS, 0.5);
-    let pctQ90 = quantile(dPctS, 0.9);
-
-    if (act === 'seal_gaps' || act === 'close_windows_inversion') {
-      pctQ10 = Math.max(0, pctQ10);
-      pctMed = Math.max(0, pctMed);
-      pctQ90 = Math.max(0, pctQ90);
-    }
-
-    const envelope: ToolEnvelope<ImpactEstimateValue> = {
-      call_id: `imp_${act}`,
-      ok: true,
-      value: {
-        action: act,
-        daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
-        daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
-        daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
-        overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
-        overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
-        overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
-        dose_avoided_median_ug: Math.round(Math.max(0, medWithout - medWith) * 10) / 10,
-        top_uncertainties: [
-          { parameter: 'infiltration_ach', variance_share_pct: 55, plain_note: 'Room leakage and wind draft' },
-          { parameter: 'deposition_k', variance_share_pct: 25, plain_note: 'Indoor particle settling rate' },
-          { parameter: 'cooking_source', variance_share_pct: 20, plain_note: 'Stove combustion emission' },
-        ],
-        priors_version: PRIORS_VERSION,
-      },
-      unit: 'ug',
-      range: [quantile(dInS, 0.1), quantile(dInS, 0.9)],
-      confidence,
-      source: `NIRVAAT Monte Carlo Impact Engine v${PRIORS_VERSION} (N=${draws} CRN draws)`,
-      as_of: asOf,
-      notes: 'Single-zone PM2.5 estimate; not a clinical risk score.',
-    };
+    const envelope = buildCrnActionEnvelope(act, dOutS, nOutS, medWithout, acc, confidence, asOf, draws);
 
     const singleInput: ImpactEstimateInput = {
       profile: input.profile,

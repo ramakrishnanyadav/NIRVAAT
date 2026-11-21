@@ -1,7 +1,33 @@
 import crypto from 'node:crypto';
-import { HouseholdProfile, ToolEnvelope } from '@nirvaat/contracts';
+import { HouseholdProfile, ToolEnvelope, ConfidenceLevel, AgeBand } from '@nirvaat/contracts';
 import { ROOM_VOLUME_PRIORS, PRIORS_VERSION } from './priors.ts';
-import { ImpactEstimateInput, ImpactEstimateValue } from './impact_estimate.ts';
+import { ActionId } from './action_library.ts';
+import { quantile, SensitivityDriver } from './sensitivity.ts';
+import { HourlyScheduleSlot } from './dose_model.ts';
+
+export interface ImpactEstimateInput {
+  profile: HouseholdProfile;
+  target_member_age_band: AgeBand;
+  schedule: HourlyScheduleSlot[];
+  action: ActionId;
+  forecast_pm25_hourly: number[];
+  start_clock_hour?: number;
+  seed?: number;
+  num_draws?: number;
+}
+
+export interface ImpactEstimateValue extends Record<string, unknown> {
+  action: ActionId;
+  daily_without_ug: { q10: number; median: number; q90: number };
+  daily_with_ug: { q10: number; median: number; q90: number };
+  daily_reduction_pct: { q10: number; median: number; q90: number };
+  overnight_without_ug: { q10: number; median: number; q90: number };
+  overnight_with_ug: { q10: number; median: number; q90: number };
+  overnight_reduction_pct: { q10: number; median: number; q90: number };
+  dose_avoided_median_ug: number;
+  top_uncertainties: SensitivityDriver[];
+  priors_version: string;
+}
 
 export function createRng(seed: number): () => number {
   let state = seed >>> 0;
@@ -23,6 +49,10 @@ export function sampleTriangular(rng: () => number, q10: number, med: number, q9
     return minVal + Math.sqrt(u * (maxVal - minVal) * (med - minVal));
   }
   return maxVal - Math.sqrt((1 - u) * (maxVal - minVal) * (maxVal - med));
+}
+
+export function samplePrior(rng: () => number, prior: { q10: number; median: number; q90: number }): number {
+  return sampleTriangular(rng, prior.q10, prior.median, prior.q90);
 }
 
 export function getRoomVolumeM3(sizeBand: HouseholdProfile['home']['size_band']): number {
@@ -85,4 +115,109 @@ export function computeImpactCacheKey(input: ImpactEstimateInput): string {
   const forecastVersion = (input.forecast_pm25_hourly ?? []).slice(0, 24).join(',');
   const rawKey = `${profileFeatures}#${forecastVersion}#${PRIORS_VERSION}#${input.seed ?? 42019}#${input.num_draws ?? 300}`;
   return crypto.createHash('sha256').update(rawKey).digest('hex');
+}
+
+export interface CrnAccumulator {
+  dailyWithArr: number[];
+  dailyPctArr: number[];
+  nightWithArr: number[];
+  nightPctArr: number[];
+}
+
+export function buildCrnActionEnvelope(
+  act: ActionId,
+  dOutS: number[],
+  nOutS: number[],
+  medWithout: number,
+  acc: CrnAccumulator,
+  confidence: ConfidenceLevel,
+  asOf: string,
+  draws: number
+): ToolEnvelope<ImpactEstimateValue> {
+  const dInS = [...acc.dailyWithArr].sort((a, b) => a - b);
+  const dPctS = [...acc.dailyPctArr].sort((a, b) => a - b);
+  const nInS = [...acc.nightWithArr].sort((a, b) => a - b);
+  const nPctS = [...acc.nightPctArr].sort((a, b) => a - b);
+
+  const medWith = quantile(dInS, 0.5);
+  let pctQ10 = quantile(dPctS, 0.1);
+  let pctMed = quantile(dPctS, 0.5);
+  let pctQ90 = quantile(dPctS, 0.9);
+
+  if (act === 'seal_gaps' || act === 'close_windows_inversion') {
+    pctQ10 = Math.max(0, pctQ10);
+    pctMed = Math.max(0, pctMed);
+    pctQ90 = Math.max(0, pctQ90);
+  }
+
+  return {
+    call_id: `imp_${act}`,
+    ok: true,
+    value: {
+      action: act,
+      daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
+      daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
+      daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
+      overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
+      overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
+      overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
+      dose_avoided_median_ug: Math.round(Math.max(0, medWithout - medWith) * 10) / 10,
+      top_uncertainties: [
+        { parameter: 'infiltration_ach', variance_share_pct: 55, plain_note: 'Room leakage and wind draft' },
+        { parameter: 'deposition_k', variance_share_pct: 25, plain_note: 'Indoor particle settling rate' },
+        { parameter: 'cooking_source', variance_share_pct: 20, plain_note: 'Stove combustion emission' },
+      ],
+      priors_version: PRIORS_VERSION,
+    },
+    unit: 'ug',
+    range: [quantile(dInS, 0.1), quantile(dInS, 0.9)],
+    confidence,
+    source: `NIRVAAT Monte Carlo Impact Engine v${PRIORS_VERSION} (N=${draws} CRN draws)`,
+    as_of: asOf,
+    notes: 'Single-zone PM2.5 estimate; not a clinical risk score.',
+  };
+}
+
+export function buildSingleImpactEnvelope(
+  callId: string,
+  action: ActionId,
+  dOutS: number[],
+  dInS: number[],
+  dPctS: number[],
+  nOutS: number[],
+  nInS: number[],
+  nPctS: number[],
+  medWithout: number,
+  medWith: number,
+  topUncertainties: SensitivityDriver[],
+  confidence: ConfidenceLevel,
+  asOf: string,
+  draws: number
+): ToolEnvelope<ImpactEstimateValue> {
+  const pctQ10 = quantile(dPctS, 0.1);
+  const pctMed = quantile(dPctS, 0.5);
+  const pctQ90 = quantile(dPctS, 0.9);
+
+  return {
+    call_id: callId,
+    ok: true,
+    value: {
+      action,
+      daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
+      daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
+      daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
+      overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
+      overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
+      overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
+      dose_avoided_median_ug: Math.round((medWithout - medWith) * 10) / 10,
+      top_uncertainties: topUncertainties,
+      priors_version: PRIORS_VERSION,
+    },
+    unit: 'ug',
+    range: [quantile(dInS, 0.1), quantile(dInS, 0.9)],
+    confidence,
+    source: `NIRVAAT Monte Carlo Impact Engine v${PRIORS_VERSION} (N=${draws} draws)`,
+    as_of: asOf,
+    notes: `${topUncertainties[0]?.plain_note ?? ''} Single-zone PM2.5 estimate; not a clinical risk score.`,
+  };
 }

@@ -11,6 +11,7 @@ import {
 } from './server/middleware/security.ts';
 import { errorHandler } from './server/middleware/errorHandler.ts';
 import planRoutes from './server/routes/apiPlan.ts';
+import simulateRoutes from './server/routes/apiSimulate.ts';
 import historyRoutes from './server/routes/apiHistory.ts';
 import telemetryRoutes from './server/routes/apiTelemetry.ts';
 
@@ -42,6 +43,7 @@ app.use(sessionMiddleware);
 
 // 4. API Routes
 app.use('/api', planRoutes);
+app.use('/api', simulateRoutes);
 app.use('/api', telemetryRoutes);
 app.use('/api/history', historyRoutes);
 
