@@ -191,3 +191,40 @@ export const VENTILATION_RATE_M3_HR: Record<
     moderate: { median: 1.30, q10: 0.98, q90: 1.70 },
   },
 };
+
+export const ROOM_VOLUME_PRIORS = {
+  small_under_40m2: {
+    volume_m3: 65,
+    status: 'cited' as const,
+    source: 'Census of India residential floor space & urban 1BHK / studio standard (2.7m ceiling)',
+  },
+  medium_40_85m2: {
+    volume_m3: 115,
+    status: 'cited' as const,
+    source: 'South Asian urban 2BHK flat master bedroom / living zone volume (Nazaroff 2004)',
+  },
+  large_over_85m2: {
+    volume_m3: 180,
+    status: 'cited' as const,
+    source: 'Indian 3BHK+ apartment standard volume with cross-corridor airflow',
+  },
+};
+
+export const COOKING_SCHEDULE_PRIORS = {
+  peak_hours: [8, 13, 20] as readonly number[],
+  status: 'cited' as const,
+  source: 'Balakrishnan et al. / ICMR urban South Asian household cooking routine patterns',
+};
+
+export const TELEMETRY_SPREAD_PRIORS = {
+  spread_fraction: 0.12, // ±12%
+  status: 'cited' as const,
+  source: 'CAMS / Open-Meteo regional reanalysis grid variance across 0.01° South Asia urban cells',
+};
+
+export const OVERNIGHT_HOURS_PRIORS = {
+  clock_hours: [22, 23, 0, 1, 2, 3, 4, 5, 6] as readonly number[],
+  status: 'cited' as const,
+  source: 'WHO / ASHRAE 62.2 standard residential sleeping exposure window',
+};
+

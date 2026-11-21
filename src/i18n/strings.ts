@@ -6,6 +6,7 @@ export interface UiStrings {
     today: string;
     forecast: string;
     household: string;
+    community: string;
     learn: string;
     audit: string;
     emergency: string;
@@ -62,6 +63,7 @@ export const STRINGS: Record<UiLang, UiStrings> = {
       today: 'Today',
       forecast: 'Forecast',
       household: 'Household',
+      community: 'Community',
       learn: 'Learn',
       audit: 'Audit & Settings',
       emergency: 'Urgent Help',
@@ -121,6 +123,7 @@ export const STRINGS: Record<UiLang, UiStrings> = {
       today: 'आज की योजना',
       forecast: 'पूर्वानुमान',
       household: 'परिवार व घर',
+      community: 'सामुदायिक सुरक्षा',
       learn: 'जानकारी',
       audit: 'ऑडिट व सेटिंग्स',
       emergency: 'आपात मदद',

@@ -61,3 +61,24 @@ export const NirvaatPlanSchema = z.object({
   follow_up_hook: z.string().min(1),
 });
 export type NirvaatPlan = z.infer<typeof NirvaatPlanSchema>;
+
+export const NirvaatPlanResponseSchema = NirvaatPlanSchema;
+export type NirvaatPlanResponse = NirvaatPlan;
+
+export const PlanRequestSchema = z.object({
+  query: z.string().min(1).max(2000),
+  runtime: z.record(z.string(), z.unknown()),
+});
+export type PlanRequest = z.infer<typeof PlanRequestSchema>;
+
+export const SavedDecisionRecordSchema = z.object({
+  id: z.string().min(1),
+  query: z.string(),
+  region_label: z.string(),
+  channel: z.enum(['WHATSAPP', 'SMS', 'APP', 'VOICE']),
+  plan: NirvaatPlanResponseSchema,
+  tool_traces: z.array(z.record(z.string(), z.unknown())),
+  model_used: z.string(),
+  created_at: z.string(),
+}).strict();
+export type SavedDecisionRecord = z.infer<typeof SavedDecisionRecordSchema>;

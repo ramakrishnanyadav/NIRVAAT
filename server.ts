@@ -1,742 +1,58 @@
-import 'dotenv/config';
 import express, { Request, Response, NextFunction } from 'express';
-import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
-import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { z } from 'zod';
+import dotenv from 'dotenv';
 import {
-  PlanRequestSchema,
-  RuntimeContextSchema,
-  SavedDecisionRecord,
-  stripUndefinedDeep,
-} from './src/shared/nirvaatTypes.ts';
-import {
-  ACTION_LIBRARY,
-  DELHI_WINTER_24H_PM25,
-  WORKED_SCENARIOS,
-  computeInhaledDose,
-  getMonteCarloMetrics,
-  pickPriorityMember,
-  reindexForecastByClockHour,
-  scoreAndRankActions,
-  solveIndoorMassBalance,
-} from './packages/engines/src/index.ts';
-import { auditDraftPlan, runNirvaatCopilot } from './server/nirvaatEngine.ts';
-import {
-  GUIDANCE_LIBRARY,
-  PRESET_REGIONS,
-  fetchLiveAirQualitySummary,
-  getAqMetrics,
-  roundCoarseCoord,
-} from './server/nirvaatTools.ts';
+  helmetMiddleware,
+  corsMiddleware,
+  timeoutMiddleware,
+  sessionMiddleware,
+  checkRateLimit,
+  resetRateLimits,
+  getRateLimitRetryAfter,
+} from './server/middleware/security.ts';
+import { errorHandler } from './server/middleware/errorHandler.ts';
+import planRoutes from './server/routes/apiPlan.ts';
+import historyRoutes, { getSessionHistoryMap } from './server/routes/apiHistory.ts';
+import telemetryRoutes from './server/routes/apiTelemetry.ts';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const app = express();
-const PORT = Number(process.env.PORT ?? 3000);
+export const app = express();
+export const PORT = Number(process.env.PORT ?? 3000);
 
-// 1. Top-level request deserialization mounted strictly before any route handlers
+// Re-export helpers for test harness compatibility
+export { checkRateLimit, resetRateLimits, getRateLimitRetryAfter, getSessionHistoryMap };
+
+// 1. Request body deserialization with strict 64kb limit
 app.use(express.json({ limit: '64kb' }));
 
 // 2. Cookie parser with signed session entropy
 const SESSION_SECRET = process.env.SESSION_SECRET || 'nirvaat_sec_token_994828182_entropy';
 app.use(cookieParser(SESSION_SECRET));
 
-// 3. Helmet security headers with Content Security Policy (OWASP ASVS L1-L2)
-app.use(
-  helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
-        connectSrc: ["'self'", 'https://air-quality-api.open-meteo.com', 'https://generativelanguage.googleapis.com'],
-        fontSrc: ["'self'", 'data:', 'https:'],
-        objectSrc: ["'none'"],
-        baseUri: ["'self'"],
-        formAction: ["'self'"],
-        frameAncestors: ["'none'"],
-      },
-    },
-    crossOriginEmbedderPolicy: false,
-    xFrameOptions: { action: 'deny' },
-    referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
-  })
-);
-
-// 4. Explicit CORS Allowlist (No wildcard '*')
-const ALLOWED_ORIGINS = new Set([
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  ...(process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map((s) => s.trim()) : []),
-]);
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  const origin = req.headers.origin;
-  if (origin && ALLOWED_ORIGINS.has(origin)) {
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-nirvaat-session');
-  }
-  if (req.method === 'OPTIONS') {
-    res.sendStatus(204);
-    return;
-  }
-  next();
-});
-
-// 5. Global Request Timeout Middleware (15s ceiling)
-app.use((_req: Request, res: Response, next: NextFunction) => {
-  const timer = setTimeout(() => {
-    if (!res.headersSent) {
-      res.status(504).json({ error: 'Gateway timeout: request took longer than 15 seconds.' });
-    }
-  }, 15_000);
-  res.on('finish', () => clearTimeout(timer));
-  res.on('close', () => clearTimeout(timer));
-  next();
-});
-
-// 6. Signed Anonymous Session Middleware
-const SESSION_COOKIE_NAME = 'nirvaat_session';
-
-app.use((req: Request, res: Response, next: NextFunction) => {
-  let sessionId = req.signedCookies?.[SESSION_COOKIE_NAME] || req.cookies?.[SESSION_COOKIE_NAME];
-  if (!sessionId) {
-    const header = req.headers['x-nirvaat-session'];
-    if (typeof header === 'string' && header.trim().length > 0) {
-      sessionId = header.trim().slice(0, 64);
-    }
-  }
-
-  if (!sessionId || typeof sessionId !== 'string' || !/^[0-9a-zA-Z_-]{8,64}$/.test(sessionId)) {
-    sessionId = crypto.randomUUID();
-  }
-
-  res.cookie(SESSION_COOKIE_NAME, sessionId, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    signed: true,
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: '/',
-  });
-
-  (req as any).sessionId = sessionId;
-  next();
-});
-
-// In-memory store for rate limiting with Retry-After calculation
-interface RateLimitBucket {
-  count: number;
-  resetAtMs: number;
-}
-const rateLimitMap = new Map<string, RateLimitBucket>();
-
-export function checkRateLimit(key: string, limit = 30, windowMs = 60_000): boolean {
-  const now = Date.now();
-  const bucket = rateLimitMap.get(key);
-  if (!bucket || now >= bucket.resetAtMs) {
-    rateLimitMap.set(key, { count: 1, resetAtMs: now + windowMs });
-    return true;
-  }
-  if (bucket.count >= limit) {
-    return false;
-  }
-  bucket.count++;
-  return true;
-}
-
-export function getRateLimitRetryAfter(key: string): number {
-  const now = Date.now();
-  const bucket = rateLimitMap.get(key);
-  if (!bucket || now >= bucket.resetAtMs) return 1;
-  return Math.max(1, Math.ceil((bucket.resetAtMs - now) / 1000));
-}
-
-export function resetRateLimits(): void {
-  rateLimitMap.clear();
-}
-
-// Session-scoped storage for saved decisions (max 25 per session, max 500 sessions in memory)
-const sessionHistory = new Map<string, SavedDecisionRecord[]>();
-
-export function getSessionHistoryMap(): Map<string, SavedDecisionRecord[]> {
-  return sessionHistory;
-}
-
-function getSessionId(req: Request): string {
-  return (req as any).sessionId || 'default';
-}
-
-const SaveHistorySchema = z.object({
-  id: z.string().trim().min(1).max(64).optional(),
-  query: z.string().trim().min(1).max(1200),
-  region_label: z.string().trim().min(1).max(120),
-  channel: z.enum(['APP', 'WHATSAPP', 'SMS', 'VOICE']),
-  plan: z.record(z.string(), z.unknown()),
-  tool_traces: z.array(z.record(z.string(), z.unknown())),
-  model_used: z.string().trim().min(1).max(80),
-  created_at: z.string().trim().min(1).max(64).optional(),
-}).strict();
-
-app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({
-    ok: true,
-    service: 'nirvaat-copilot',
-    timestamp: new Date().toISOString(),
-    cache_metrics: {
-      monte_carlo: getMonteCarloMetrics(),
-      air_quality: getAqMetrics(),
-    },
-  });
-});
-
-app.get('/api/neighborhoods', (_req: Request, res: Response) => {
-  res.json({ regions: PRESET_REGIONS });
-});
-
-app.get('/api/guidance', (_req: Request, res: Response) => {
-  res.json({ entries: GUIDANCE_LIBRARY });
-});
-
-const AirQualityQuerySchema = z.object({
-  lat: z.coerce.number().min(-90).max(90).optional(),
-  lon: z.coerce.number().min(-180).max(180).optional(),
-  maxAge: z.coerce.number().min(15).max(180).optional(),
-  sim: z.enum(['none', 'no_impact', 'no_aq', 'all_down']).optional(),
-  city: z.string().max(60).optional(),
-  neighborhood: z.string().max(60).optional(),
-}).strict();
-
-app.get('/api/air-quality', async (req: Request, res: Response) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
-  if (!checkRateLimit(`aq_${clientIp}`, 60, 60_000)) {
-    const retryAfter = getRateLimitRetryAfter(`aq_${clientIp}`);
-    res.setHeader('Retry-After', retryAfter.toString());
-    res.status(429).json({ error: 'Rate limit exceeded for air quality requests.', retry_after: retryAfter });
-    return;
-  }
-
-  const parsed = AirQualityQuerySchema.safeParse(req.query);
-  if (!parsed.success) {
-    res.status(400).json({
-      error: 'Invalid coarse latitude or longitude coordinates or query parameters.',
-      details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    });
-    return;
-  }
-
-  const latRaw = parsed.data.lat ?? PRESET_REGIONS[0].latitude;
-  const lonRaw = parsed.data.lon ?? PRESET_REGIONS[0].longitude;
-  const maxAgeRaw = parsed.data.maxAge ?? 60;
-  const sim = parsed.data.sim ?? 'none';
-
-  const lat = roundCoarseCoord(latRaw);
-  const lon = roundCoarseCoord(lonRaw);
-  const city = parsed.data.city ?? 'Custom Grid';
-  const neighborhood = parsed.data.neighborhood ?? `Grid ${lat.toFixed(2)}, ${lon.toFixed(2)}`;
-
-  const region = {
-    city,
-    neighborhood,
-    grid_id: `${lat.toFixed(2)}_${lon.toFixed(2)}`,
-    latitude: lat,
-    longitude: lon,
-    emergency_number: '112',
-    official_source: 'CPCB / Open-Meteo',
-    active_policy: 'Winter Smog Advisory',
-  };
-
-  const result = await fetchLiveAirQualitySummary(
-    region,
-    Number.isFinite(maxAgeRaw) ? Math.min(180, Math.max(15, maxAgeRaw)) : 60,
-    sim
-  );
-
-  if (!result.ok) {
-    res.status(503).json({
-      ok: false,
-      error: result.error,
-      grid_id: region.grid_id,
-    });
-    return;
-  }
-
-  res.json({ ok: true, data: result.data });
-});
-
-app.post('/api/plan', async (req: Request, res: Response) => {
-  const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
-  const parsed = PlanRequestSchema.safeParse(rawBody);
-
-  if (!parsed.success) {
-    res.status(400).json({
-      error: 'Invalid plan request payload.',
-      details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    });
-    return;
-  }
-
-  try {
-    const cleanInput = stripUndefinedDeep(parsed.data);
-    // Enforce coarse coordinate rounding (H6 Privacy)
-    cleanInput.runtime.region.latitude = roundCoarseCoord(cleanInput.runtime.region.latitude);
-    cleanInput.runtime.region.longitude = roundCoarseCoord(cleanInput.runtime.region.longitude);
-    cleanInput.runtime.region.grid_id = `${cleanInput.runtime.region.latitude.toFixed(2)}_${cleanInput.runtime.region.longitude.toFixed(2)}`;
-
-    const result = await runNirvaatCopilot(cleanInput.query, cleanInput.runtime);
-    const createdAt = new Date().toISOString();
-
-    const responsePayload = stripUndefinedDeep({
-      plan: result.plan,
-      tool_traces: result.tool_traces,
-      audit: result.audit,
-      model_used: result.model_used,
-      created_at: createdAt,
-    });
-
-    res.json(responsePayload);
-  } catch (err) {
-    const rawMessage = err instanceof Error ? err.message : 'Unable to generate exposure plan.';
-    const sanitizedMessage = rawMessage.replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_API_KEY]');
-    const statusCode = /API_KEY|GEMINI_API_KEY|PERMISSION_DENIED/i.test(sanitizedMessage) ? 500 : 502;
-    res.status(statusCode).json({
-      error: sanitizedMessage,
-      hint: /GEMINI_API_KEY/i.test(sanitizedMessage)
-        ? 'Check your GEMINI_API_KEY in server environment settings.'
-        : 'Retry the request or switch to offline general safety guidance.',
-    });
-  }
-});
-
-const EnginePlanBodySchema = z.object({
-  runtime: RuntimeContextSchema,
-}).strict();
-
-app.post('/api/engines/plan', async (req: Request, res: Response) => {
-  const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
-  const parsed = EnginePlanBodySchema.safeParse(rawBody);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid runtime payload for deterministic plan.' });
-    return;
-  }
-
-  const rt = stripUndefinedDeep(parsed.data.runtime);
-  const lat = roundCoarseCoord(rt.region.latitude);
-  const lon = roundCoarseCoord(rt.region.longitude);
-  
-  const t0 = performance.now();
-  const aqRes = await fetchLiveAirQualitySummary(
-    { ...rt.region, latitude: lat, longitude: lon, grid_id: `${lat.toFixed(2)}_${lon.toFixed(2)}` },
-    rt.max_data_age_min,
-    rt.simulated_degradation ?? 'none'
-  );
-  const aqDurationMs = Math.max(1, Math.round(performance.now() - t0));
-
-  let startHour = 0;
-  let hasImputation = false;
-  let forecastHourly: number[] = [];
-
-  if (aqRes.ok && aqRes.data.hourly_forecast && aqRes.data.hourly_forecast.length >= 12) {
-    if (aqRes.data.hourly_forecast[0]?.time) {
-      const parsedHour = parseInt(aqRes.data.hourly_forecast[0].time.split('T')[1]?.split(':')[0] ?? '', 10);
-      if (!Number.isNaN(parsedHour)) {
-        startHour = parsedHour;
-      }
-    }
-    // Task 1: Re-index forecast array by LOCAL CLOCK HOUR so cooking, sleep, commute, and overnight use clock hours
-    forecastHourly = reindexForecastByClockHour(aqRes.data.hourly_forecast, startHour, aqRes.data.pm2_5 ?? 120);
-    hasImputation = aqRes.data.hourly_forecast.some((p) => typeof p.pm2_5 !== 'number');
-  } else {
-    forecastHourly = DELHI_WINTER_24H_PM25;
-    hasImputation = true;
-  }
-
-  const isSimulatedDegradation = (rt.simulated_degradation ?? 'none') !== 'none';
-  const isUsingFallback = !aqRes.ok || !aqRes.data.hourly_forecast || aqRes.data.hourly_forecast.length < 12;
-  const dataStatus: 'tier_A' | 'tier_B' | 'tier_C' =
-    isSimulatedDegradation || isUsingFallback
-      ? 'tier_C'
-      : hasImputation
-        ? 'tier_B'
-        : 'tier_A';
-
-  const isLive = dataStatus === 'tier_A';
-  const engineProfile = {
-    ...rt.profile,
-    home: {
-      ...rt.profile.home,
-      purifier: {
-        has: rt.profile.home.purifier.has,
-        type: rt.profile.home.purifier.type,
-        cadr_m3_hr: rt.profile.home.purifier.cadr ?? 0,
-      },
-    },
-  };
-
-  const baseSchedule = Array.from({ length: forecastHourly.length }, (_, i) => {
-    const clockHour = (startHour + i) % 24;
-    if (rt.profile.constraints.outdoor_work && clockHour >= 9 && clockHour <= 14) {
-      return { hour_index: clockHour, micro_env: 'outdoors' as const, activity: 'moderate' as const, mask: 'none' as const };
-    }
-    if (clockHour === 8 || clockHour === 18) {
-      return {
-        hour_index: clockHour,
-        micro_env: 'commute' as const,
-        activity: 'light' as const,
-        mask: 'none' as const,
-        commute_mode: rt.profile.commute.mode,
-      };
-    }
-    return {
-      hour_index: clockHour,
-      micro_env: 'home' as const,
-      activity: clockHour >= 22 || clockHour <= 6 ? ('rest' as const) : ('light' as const),
-      mask: 'none' as const,
-    };
-  });
-
-  const t1 = performance.now();
-  const scoredEnv = scoreAndRankActions(
-    engineProfile,
-    baseSchedule,
-    forecastHourly,
-    undefined,
-    `score_${Date.now().toString(36)}`
-  );
-  const scoreDurationMs = Math.max(1, Math.round(performance.now() - t1));
-
-  const isHindi = rt.locale.toLowerCase().startsWith('hi');
-  const priorityMember = pickPriorityMember(engineProfile);
-  const cleanestLabel = aqRes.ok && aqRes.data.cleanest_window ? aqRes.data.cleanest_window.label : '13:00–16:00';
-  const currentPm = aqRes.ok ? aqRes.data.pm2_5 : null;
-
-  const whenMap: Record<string, string> = {
-    seal_gaps: isHindi ? 'शाम 7 बजे से सुबह 10 बजे तक' : 'Evening 19:00 through 10:00 AM peak',
-    close_windows_inversion: isHindi ? 'रात और सुबह की स्मॉग अवधि में' : 'Overnight & morning inversion hours',
-    diy_filter: isHindi ? 'सोने से 1 घंटा पहले और पूरी रात' : '1h pre-sleep & all night (door closed)',
-    run_purifier_presleep: isHindi ? 'सोने से 1 घंटा पहले और पूरी रात' : '1h pre-sleep & overnight',
-    cook_with_hood_window: isHindi ? 'हर बार खाना पकाते समय' : 'During every cooking session',
-    time_shift_commute: isHindi ? `सबसे साफ समय (${cleanestLabel})` : `Cleanest dispersion window (${cleanestLabel})`,
-    n95_on_commute: isHindi ? 'बाहर निकलते समय (2+ वर्ष)' : 'During outdoor commute/shift (ages 2+)',
-    avoid_incense: isHindi ? 'बंद कमरों में पूरे दिन' : 'Whenever exterior windows are closed',
-    ventilate_afternoon_window: isHindi ? `दोपहर की साफ खिड़की (${cleanestLabel})` : `Brief 20m flush at ${cleanestLabel}`,
-  };
-
-  const plan = {
-    language: isHindi ? 'hi-IN' : 'en-IN',
-    mode: 'plan' as const,
-    data_status: dataStatus,
-    situation: {
-      summary: isLive
-        ? isHindi
-          ? `${rt.region.neighborhood} में वर्तमान PM2.5 ${currentPm} µg/m³ है। सबसे साफ समय ${cleanestLabel} रहेगा।`
-          : `Current grid PM2.5 is ${currentPm} µg/m³ in ${rt.region.neighborhood}; cleanest dispersion window is ${cleanestLabel}.`
-        : hasImputation && !isUsingFallback
-          ? isHindi
-            ? `${rt.region.neighborhood} में लाइव डेटा में कुछ अनुमानित मान शामिल हैं (वर्तमान PM2.5: ${currentPm} µg/m³)।`
-            : `Live grid feed with partial hour interpolation for ${rt.region.neighborhood} (Current PM2.5: ${currentPm} µg/m³).`
-          : isHindi
-            ? `सामान्य मार्गदर्शन, लाइव डेटा उपलब्ध नहीं है। ${rt.region.official_source} देखें।`
-            : `General guidance, fallback reference data. Check ${rt.region.official_source} for live readings.`,
-      confidence: dataStatus === 'tier_A' ? ('high' as const) : dataStatus === 'tier_B' ? ('medium' as const) : ('low' as const),
-      sources: isLive && aqRes.ok
-        ? [aqRes.data.source, scoredEnv.source]
-        : [rt.region.official_source, scoredEnv.source],
-      as_of: aqRes.ok ? aqRes.data.as_of : new Date().toISOString(),
-    },
-    assumptions: [
-      isHindi
-        ? `${priorityMember.label} को प्राथमिकता देते हुए आपके घर के आकार (${rt.profile.home.size_band}) के लिए गणना की गई।`
-        : `Prioritized ${priorityMember.label}; modeled for ${rt.profile.home.size_band.replace(/_/g, ' ')} dwelling.`,
-    ],
-    actions: scoredEnv.value.top_actions.map((item) => ({
-      rank: item.rank,
-      title: item.title,
-      when: whenMap[item.action_id] ?? 'Today',
-      how: ACTION_LIBRARY[item.action_id].description,
-      why_it_works: item.top_uncertainty || 'Lowers inhaled PM2.5 concentration during highest-dose hours.',
-      effect: {
-        metric: '24h inhaled PM2.5 dose',
-        with: isLive || dataStatus === 'tier_B' ? `${item.daily_with_ug.q10}–${item.daily_with_ug.q90} µg/day` : null,
-        without: isLive || dataStatus === 'tier_B' ? `${item.daily_without_ug.q10}–${item.daily_without_ug.q90} µg/day` : null,
-        change_range: isLive || dataStatus === 'tier_B'
-          ? `-${item.daily_reduction_pct.q10}% to -${item.daily_reduction_pct.q90}%`
-          : item.dose_avoided_ug > 150
-            ? 'large'
-            : 'moderate',
-        confidence: scoredEnv.confidence,
-        tool_ref: item.impact_call_id,
-      },
-      cost: item.cost,
-      evidence: item.evidence,
-      protects: item.protects,
-    })),
-    if_you_can_do_more: scoredEnv.value.extra_actions.map(
-      (e) => `${e.title} (${e.cost} cost · ${e.evidence} evidence)`
-    ),
-    myth_correction: isHindi
-      ? 'घर के पौधे कमरे के PM2.5 को सार्थक रूप से साफ नहीं करते; हवा बंद करना और फ़िल्टर चलाना अधिक प्रभावी है।'
-      : 'Indoor houseplants do not meaningfully remove PM2.5 smog; sealing gaps and particle filtration do.',
-    safety_note: rt.profile.members.some((m) => m.age_band === 'infant_under_2')
-      ? 'Never place masks on children under age 2; protect them via clean-air sleeping rooms and timing.'
-      : 'Avoid ozone generators, ionizers, or burning camphor/incense indoors.',
-    follow_up_hook: isHindi
-      ? 'अपने घर की किसी खास योजना (जैसे स्कूल का समय या खाना पकाना) के बारे में पूछें।'
-      : 'Ask about a specific routine (school run, cooking smoke, or night ventilation) for tailored Copilot advice.',
-  };
-
-  const traces = [
-    {
-      call_id: aqRes.ok ? aqRes.data.tool_ref : 'aq_unavailable',
-      tool_name: 'get_air_quality' as const,
-      args: { grid_id: `${lat.toFixed(2)}_${lon.toFixed(2)}` },
-      result: aqRes.ok
-        ? {
-            call_id: aqRes.data.tool_ref,
-            ok: true,
-            value: { pm2_5: aqRes.data.pm2_5, cleanest_window: aqRes.data.cleanest_window },
-            unit: 'ug/m3',
-            range: [Math.round((aqRes.data.pm2_5 ?? 0) * 0.88), Math.round((aqRes.data.pm2_5 ?? 0) * 1.12)],
-            confidence: aqRes.data.confidence,
-            source: aqRes.data.source,
-            as_of: aqRes.data.as_of,
-            notes: isLive ? 'Live Open-Meteo grid feed' : hasImputation ? 'Partially imputed grid feed' : 'Fallback seasonal reference',
-          }
-        : { ok: false, error: aqRes.error },
-      status: aqRes.ok ? ('ok' as const) : ('failed' as const),
-      duration_ms: aqDurationMs,
-      timestamp: new Date().toISOString(),
-    },
-    {
-      call_id: scoredEnv.call_id,
-      tool_name: 'impact_estimate' as const,
-      args: { priority_member: priorityMember.label, preset_count: scoredEnv.value.top_actions.length },
-      result: scoredEnv as unknown as Record<string, unknown>,
-      status: 'ok' as const,
-      duration_ms: scoreDurationMs,
-      timestamp: new Date().toISOString(),
-    },
-  ];
-
-  // Perform rigorous verifier audit on the generated deterministic plan
-  const audit = auditDraftPlan(
-    plan as any,
-    traces as any,
-    `Deterministic engine plan for ${priorityMember.label}`,
-    rt
-  );
-
-  res.json(
-    stripUndefinedDeep({
-      plan,
-      tool_traces: traces,
-      audit,
-      model_used: 'nirvaat-deterministic-engines-v1',
-      created_at: new Date().toISOString(),
-      worked_presets: Object.values(WORKED_SCENARIOS).map((w) => ({ id: w.id, label: w.label })),
-    })
-  );
-});
-
-const SimulateTwinSchema = z.object({
-  outdoor_pm25_hourly: z.array(z.number().min(0).max(1200)).min(12).max(24),
-  size_band: z.enum(['small_under_40m2', 'medium_40_85m2', 'large_over_85m2']),
-  age_band: z.enum(['infant_under_2', 'child_2_12', 'teen', 'adult', 'older_adult_65_plus']),
-  seal_gaps: z.boolean(),
-  clean_cooking: z.boolean(),
-  filter_mode: z.enum(['none', 'diy_cr_box', 'hepa']),
-}).strict();
-
-app.post('/api/engines/simulate', (req: Request, res: Response) => {
-  const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
-  const parsed = SimulateTwinSchema.safeParse(rawBody);
-  if (!parsed.success) {
-    res.status(400).json({ error: 'Invalid simulation parameters.' });
-    return;
-  }
-
-  const { outdoor_pm25_hourly, size_band, age_band, seal_gaps, clean_cooking, filter_mode } = parsed.data;
-  const volume = size_band === 'small_under_40m2' ? 65 : size_band === 'large_over_85m2' ? 180 : 115;
-
-  const baselineIndoor = solveIndoorMassBalance({
-    outdoor_pm25_hourly,
-    room_volume_m3: volume,
-    penetration_p: 0.82,
-    lambda_ach: 1.35,
-    deposition_k: 0.39,
-    source_ug_per_hr: outdoor_pm25_hourly.map((_, h) => (h === 8 || h === 13 || h === 20 ? 4800 : 0)),
-    cadr_eff_m3_hr: 0,
-  });
-
-  const cadrEff = filter_mode === 'hepa' ? 320 * 0.72 : filter_mode === 'diy_cr_box' ? 280 * 0.65 : 0;
-  const simulatedIndoor = solveIndoorMassBalance({
-    outdoor_pm25_hourly,
-    room_volume_m3: volume,
-    penetration_p: seal_gaps ? 0.65 : 0.82,
-    lambda_ach: seal_gaps ? 0.55 : 1.35,
-    deposition_k: 0.39,
-    source_ug_per_hr: outdoor_pm25_hourly.map((_, h) =>
-      h === 8 || h === 13 || h === 20 ? (clean_cooking ? 1100 : 4800) : 0
-    ),
-    cadr_eff_m3_hr: cadrEff,
-  });
-
-  const schedule = outdoor_pm25_hourly.map((_, h) => ({
-    hour_index: h,
-    micro_env: 'home' as const,
-    activity: h >= 22 || h <= 6 ? ('rest' as const) : ('light' as const),
-    mask: 'none' as const,
-  }));
-
-  const doseBase = computeInhaledDose({
-    age_band,
-    schedule,
-    indoor_pm25_hourly: baselineIndoor.hourly,
-    outdoor_pm25_hourly,
-  });
-
-  const doseSim = computeInhaledDose({
-    age_band,
-    schedule,
-    indoor_pm25_hourly: simulatedIndoor.hourly,
-    outdoor_pm25_hourly,
-  });
-
-  res.json({
-    ok: true,
-    baseline_hourly: baselineIndoor.hourly,
-    simulated_hourly: simulatedIndoor.hourly,
-    baseline_mean_pm25: baselineIndoor.mean,
-    simulated_mean_pm25: simulatedIndoor.mean,
-    baseline_dose_ug: doseBase.dailyDoseUg,
-    simulated_dose_ug: doseSim.dailyDoseUg,
-    reduction_pct:
-      doseBase.dailyDoseUg > 0
-        ? Math.round(((doseBase.dailyDoseUg - doseSim.dailyDoseUg) / doseBase.dailyDoseUg) * 100)
-        : 0,
-  });
-});
-
-app.get('/api/history', (req: Request, res: Response) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
-  if (!checkRateLimit(`hist_get_${clientIp}`, 60, 60_000)) {
-    const retryAfter = getRateLimitRetryAfter(`hist_get_${clientIp}`);
-    res.setHeader('Retry-After', retryAfter.toString());
-    res.status(429).json({ error: 'Rate limit exceeded for history queries.', retry_after: retryAfter });
-    return;
-  }
-  const sessionId = getSessionId(req);
-  const items = sessionHistory.get(sessionId) ?? [];
-  res.json({ items });
-});
-
-app.post('/api/history', (req: Request, res: Response) => {
-  const clientIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || req.socket.remoteAddress || 'unknown';
-  if (!checkRateLimit(`hist_post_${clientIp}`, 30, 60_000)) {
-    const retryAfter = getRateLimitRetryAfter(`hist_post_${clientIp}`);
-    res.setHeader('Retry-After', retryAfter.toString());
-    res.status(429).json({ error: 'Rate limit exceeded for history saves.', retry_after: retryAfter });
-    return;
-  }
-
-  const rawBody = req.body && typeof req.body === 'object' ? req.body : {};
-  const parsed = SaveHistorySchema.safeParse(rawBody);
-  if (!parsed.success) {
-    res.status(400).json({
-      error: 'Invalid decision record payload.',
-      details: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-    });
-    return;
-  }
-
-  const sanitized = stripUndefinedDeep({
-    id: parsed.data.id ?? `dec_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-    query: parsed.data.query,
-    region_label: parsed.data.region_label,
-    channel: parsed.data.channel,
-    plan: parsed.data.plan,
-    tool_traces: parsed.data.tool_traces,
-    model_used: parsed.data.model_used,
-    created_at: parsed.data.created_at ?? new Date().toISOString(),
-  }) as unknown as SavedDecisionRecord;
-
-  const sessionId = getSessionId(req);
-  let records = sessionHistory.get(sessionId);
-  if (!records) {
-    records = [];
-    if (sessionHistory.size >= 500) {
-      const firstKey = sessionHistory.keys().next().value;
-      if (firstKey) sessionHistory.delete(firstKey);
-    }
-    sessionHistory.set(sessionId, records);
-  }
-
-  const existingIdx = records.findIndex((d) => d.id === sanitized.id);
-  if (existingIdx >= 0) {
-    records[existingIdx] = sanitized;
-  } else {
-    records.unshift(sanitized);
-    if (records.length > 25) records.pop();
-  }
-
-  res.status(201).json({ saved: true, record: sanitized });
-});
-
-app.delete('/api/history/:id', (req: Request, res: Response) => {
-  const sessionId = getSessionId(req);
-  const records = sessionHistory.get(sessionId);
-  if (!records) {
-    res.status(404).json({ error: 'Saved decision not found.' });
-    return;
-  }
-  const id = String(req.params.id ?? '');
-  const idx = records.findIndex((d) => d.id === id);
-  if (idx === -1) {
-    res.status(404).json({ error: 'Saved decision not found.' });
-    return;
-  }
-  records.splice(idx, 1);
-  res.json({ deleted: true, id });
-});
-
-// Delete-my-data endpoint (purges all stored history for the current session)
-app.delete('/api/history', (req: Request, res: Response) => {
-  const sessionId = getSessionId(req);
-  sessionHistory.delete(sessionId);
-  res.json({ cleared: true, message: 'All personal history successfully cleared.' });
-});
-
-app.delete('/api/privacy/purge-data', (req: Request, res: Response) => {
-  const sessionId = getSessionId(req);
-  sessionHistory.delete(sessionId);
-  res.json({ ok: true, message: 'All session telemetry and saved decisions purged.' });
-});
-
-app.get('/api/privacy/policy', (_req: Request, res: Response) => {
-  res.json({
-    retention_policy: 'In-memory session storage only. Records expire when session cookie expires (7 days) or upon FIFO limit eviction.',
-    coarse_location_notice: 'Coordinates are rounded to 2 decimal places (~1.1 km coarse spatial grid). Note: coordinate rounding provides spatial aggregation to protect exact household location, but does not constitute differential privacy.',
-    pii_policy: 'Zero personal names, telephone numbers, IP addresses, or street addresses are logged or persisted.',
-    purge_endpoint: 'DELETE /api/privacy/purge-data or DELETE /api/history',
-  });
-});
-
-// Sanitized Error Handler (OWASP ASVS: No stack traces or upstream errors leaked)
-app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+// 3. Security Middlewares (Helmet CSP, CORS, Timeout, Signed Session)
+app.use(helmetMiddleware);
+app.use(corsMiddleware);
+app.use(timeoutMiddleware);
+app.use(sessionMiddleware);
+
+// 4. API Routes
+app.use('/api', planRoutes);
+app.use('/api', telemetryRoutes);
+app.use('/api/history', historyRoutes);
+
+// 5. Centralized Typed Error Handler
+app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
   if (err && typeof err === 'object' && 'type' in err && (err as any).type === 'entity.too.large') {
     res.status(413).json({ error: 'Payload Too Large: request body exceeds 64kb limit.' });
     return;
   }
-  res.status(500).json({ error: 'An internal server error occurred.' });
+  errorHandler(err, req, res, next);
 });
 
 export async function startServer() {
@@ -748,21 +64,30 @@ export async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
-    app.use(express.static(distDir));
-    app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(distDir, 'index.html'));
+    const distPath = path.resolve(__dirname, 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (_req, res) => {
+      res.sendFile(path.resolve(distPath, 'index.html'));
     });
   }
 
   return app.listen(PORT, '0.0.0.0', () => {
-    console.log(`NIRVAAT server listening on http://0.0.0.0:${PORT}`);
+    console.log(`[NIRVAAT Server] Listening on http://0.0.0.0:${PORT}`);
   });
 }
 
-export { app };
+// Auto-start server in direct execution
+const isTestRun = process.env.NODE_ENV === 'test';
+const isDirectRun = Boolean(
+  process.argv[1] &&
+    (process.argv[1].endsWith('server.ts') ||
+      process.argv[1].endsWith('server.js') ||
+      process.argv[1].endsWith('server'))
+);
 
-const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain && process.env.NODE_ENV !== 'test') {
-  startServer();
+if (!isTestRun && isDirectRun) {
+  startServer().catch((err) => {
+    console.error('Fatal startup error:', err);
+    process.exit(1);
+  });
 }

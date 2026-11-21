@@ -5,17 +5,23 @@ export interface IndoorHourlyParams {
   /** Outdoor PM2.5 per hour (ug/m3) */
   outdoor_pm25_hourly: number[];
   /** Room air volume V (m3), e.g., 35 m3 bedroom or 75 m3 1BHK */
-  room_volume_m3: number;
+  room_volume_m3?: number;
+  volume_m3?: number;
   /** Penetration factor P (0..1) */
-  penetration_p: number;
+  penetration_p?: number;
+  penetration_factor?: number;
   /** Air exchange rate lambda (1/h) per hour or scalar */
-  lambda_ach: number | number[];
+  lambda_ach?: number | number[];
+  ach_hourly?: number | number[];
   /** Surface deposition rate k (1/h) */
-  deposition_k: number;
+  deposition_k?: number;
+  deposition_rate_hourly?: number;
   /** Indoor emission S (ug/h) per hour or scalar */
-  source_ug_per_hr: number | number[];
+  source_ug_per_hr?: number | number[];
+  indoor_source_hourly?: number | number[];
   /** Effective CADR (rated_cadr * derating) in m3/h per hour or scalar */
-  cadr_eff_m3_hr: number | number[];
+  cadr_eff_m3_hr?: number | number[];
+  cadr_hourly?: number | number[];
   /** Initial indoor PM2.5 (ug/m3) */
   initial_indoor_pm25?: number;
   /** Optional two-zone adjacent room coupling (m3/h exchange with cleaner/dirtier room) */
@@ -47,20 +53,24 @@ export function solveIndoorMassBalance(params: IndoorHourlyParams): {
   peak: number;
   steadyStateNoSource: number;
 } {
-  const V = Math.max(5, params.room_volume_m3);
-  const P = Math.min(1, Math.max(0, params.penetration_p));
-  const k = Math.max(0, params.deposition_k);
+  const V = Math.max(5, params.room_volume_m3 ?? params.volume_m3 ?? 80);
+  const P = Math.min(1, Math.max(0, params.penetration_p ?? params.penetration_factor ?? 0.7));
+  const k = Math.max(0, params.deposition_k ?? params.deposition_rate_hourly ?? 0.39);
   const hours = params.outdoor_pm25_hourly.length;
 
   if (hours === 0) {
     return { hourly: [], mean: 0, overnightMean: 0, peak: 0, steadyStateNoSource: 0 };
   }
 
+  const lambdaParam = params.lambda_ach ?? params.ach_hourly ?? 1.0;
+  const cadrParam = params.cadr_eff_m3_hr ?? params.cadr_hourly ?? 0;
+  const sourceParam = params.source_ug_per_hr ?? params.indoor_source_hourly ?? 0;
+
   const getAt = (arrOrScalar: number | number[], idx: number): number =>
     Array.isArray(arrOrScalar) ? (arrOrScalar[idx] ?? arrOrScalar[arrOrScalar.length - 1] ?? 0) : arrOrScalar;
 
-  const firstLambda = Math.max(0.05, getAt(params.lambda_ach, 0));
-  const firstCadr = Math.max(0, getAt(params.cadr_eff_m3_hr, 0));
+  const firstLambda = Math.max(0.05, getAt(lambdaParam, 0));
+  const firstCadr = Math.max(0, getAt(cadrParam, 0));
   const firstOut = Math.max(0, params.outdoor_pm25_hourly[0]);
 
   let cIn =
@@ -72,9 +82,9 @@ export function solveIndoorMassBalance(params: IndoorHourlyParams): {
 
   for (let t = 0; t < hours; t++) {
     const cOut = Math.max(0, params.outdoor_pm25_hourly[t]);
-    const lam = Math.max(0.05, getAt(params.lambda_ach, t));
-    const s = Math.max(0, getAt(params.source_ug_per_hr, t));
-    const cadr = Math.max(0, getAt(params.cadr_eff_m3_hr, t));
+    const lam = Math.max(0.05, getAt(lambdaParam, t));
+    const s = Math.max(0, getAt(sourceParam, t));
+    const cadr = Math.max(0, getAt(cadrParam, t));
 
     let inflowRate = P * lam * cOut + s / V;
     let totalLossRate = lam + k + cadr / V;

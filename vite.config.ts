@@ -52,7 +52,11 @@ export default defineConfig(() => {
     ],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(__dirname, './src'),
+        '@nirvaat/contracts': path.resolve(__dirname, './packages/contracts/src/index.ts'),
+        '@nirvaat/engines': path.resolve(__dirname, './packages/engines/src/index.ts'),
+        '@nirvaat/verifier': path.resolve(__dirname, './packages/verifier/src/index.ts'),
+        '@nirvaat/prompts': path.resolve(__dirname, './packages/prompts/src/index.ts'),
       },
     },
     server: {

@@ -17,9 +17,15 @@
     "allowJs": true,
     "jsx": "react-jsx",
     "paths": {
-      "@/*": [
-        "./*"
-      ]
+      "@/*": ["./src/*"],
+      "@nirvaat/contracts": ["./packages/contracts/src/index.ts"],
+      "@nirvaat/contracts/*": ["./packages/contracts/src/*"],
+      "@nirvaat/engines": ["./packages/engines/src/index.ts"],
+      "@nirvaat/engines/*": ["./packages/engines/src/*"],
+      "@nirvaat/verifier": ["./packages/verifier/src/index.ts"],
+      "@nirvaat/verifier/*": ["./packages/verifier/src/*"],
+      "@nirvaat/prompts": ["./packages/prompts/src/index.ts"],
+      "@nirvaat/prompts/*": ["./packages/prompts/src/*"]
     },
     "allowImportingTsExtensions": true,
     "noEmit": true

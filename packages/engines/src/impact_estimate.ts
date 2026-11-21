@@ -1,104 +1,15 @@
 import crypto from 'node:crypto';
-import { AgeBand, HouseholdProfile } from '../../contracts/src/profile.ts';
-import { ConfidenceLevel, ToolEnvelope } from '../../contracts/src/toolEnvelope.ts';
+import { AgeBand, HouseholdProfile, ToolEnvelope, ConfidenceLevel } from '@nirvaat/contracts';
+import { ActionId, ActionDefinition, ACTION_LIBRARY } from './action_library.ts';
 import { HourlyScheduleSlot, computeInhaledDose, reindexForecastByClockHour } from './dose_model.ts';
 import { solveIndoorMassBalance } from './indoor_model.ts';
-import { PARAMETER_PRIORS, PRIORS_VERSION } from './priors.ts';
+import { PARAMETER_PRIORS, PRIORS_VERSION, ROOM_VOLUME_PRIORS, COOKING_SCHEDULE_PRIORS } from './priors.ts';
+import { SensitivityDriver, quantile, deriveSensitivityDrivers, SampleRecord } from './sensitivity.ts';
 
-export type ActionId =
-  | 'time_shift_commute'
-  | 'close_windows_inversion'
-  | 'ventilate_afternoon_window'
-  | 'seal_gaps'
-  | 'run_purifier_presleep'
-  | 'diy_filter'
-  | 'n95_on_commute'
-  | 'cook_with_hood_window'
-  | 'avoid_incense';
-
-export interface ActionDefinition {
-  id: ActionId;
-  title: string;
-  lever: 'timing' | 'place_route' | 'protection' | 'source_control';
-  cost: 'free' | 'low' | 'medium' | 'high';
-  evidence: 'strong' | 'moderate' | 'emerging';
-  description: string;
-}
-
-export const ACTION_LIBRARY: Record<ActionId, ActionDefinition> = {
-  time_shift_commute: {
-    id: 'time_shift_commute',
-    title: 'Shift outdoor trip to afternoon window',
-    lever: 'timing',
-    cost: 'free',
-    evidence: 'moderate',
-    description: 'Moves outdoor commute/errand from morning inversion peak to cleanest afternoon hours.',
-  },
-  close_windows_inversion: {
-    id: 'close_windows_inversion',
-    title: 'Close exterior windows overnight & mornings',
-    lever: 'protection',
-    cost: 'free',
-    evidence: 'strong',
-    description: 'Prevents high night/morning inversion plumes from flushing straight indoors.',
-  },
-  ventilate_afternoon_window: {
-    id: 'ventilate_afternoon_window',
-    title: 'Flush indoor air during afternoon dip',
-    lever: 'timing',
-    cost: 'free',
-    evidence: 'moderate',
-    description: 'Opens windows briefly for 20–30 minutes only during the lowest outdoor PM2.5 afternoon hours.',
-  },
-  seal_gaps: {
-    id: 'seal_gaps',
-    title: 'Seal bedroom door & window gaps',
-    lever: 'protection',
-    cost: 'free',
-    evidence: 'moderate',
-    description: 'Uses rolled damp towels or low-cost weatherstripping to halve drafty infiltration λ.',
-  },
-  run_purifier_presleep: {
-    id: 'run_purifier_presleep',
-    title: 'Run HEPA purifier pre-sleep & overnight',
-    lever: 'protection',
-    cost: 'low',
-    evidence: 'strong',
-    description: 'Starts bedroom HEPA 1 hour before bedtime with the door closed.',
-  },
-  diy_filter: {
-    id: 'diy_filter',
-    title: 'Run DIY MERV-13 box-fan filter overnight',
-    lever: 'protection',
-    cost: 'low',
-    evidence: 'strong',
-    description: 'Uses a taped MERV-13 furnace filter on a box fan in the closed sleeping room.',
-  },
-  n95_on_commute: {
-    id: 'n95_on_commute',
-    title: 'Wear fit-checked N95/KF94 outdoors (ages 2+)',
-    lever: 'protection',
-    cost: 'low',
-    evidence: 'strong',
-    description: 'Pinches nose wire and seals cheek gaps during outdoor commute/work hours.',
-  },
-  cook_with_hood_window: {
-    id: 'cook_with_hood_window',
-    title: 'Close kitchen door, cover pans & exhaust smoke',
-    lever: 'source_control',
-    cost: 'free',
-    evidence: 'strong',
-    description: 'Isolates and vents cooking PM2.5 plumes away from sleeping/living spaces.',
-  },
-  avoid_incense: {
-    id: 'avoid_incense',
-    title: 'Pause indoor incense, dhoop & mosquito coils',
-    lever: 'source_control',
-    cost: 'free',
-    evidence: 'strong',
-    description: 'Eliminates high indoor submicron combustion plumes in closed winter rooms.',
-  },
-};
+export * from './action_library.ts';
+export * from './sensitivity.ts';
+export { batchEvaluateActionsCRN } from './impact_crn.ts';
+export type { BatchImpactInput } from './impact_crn.ts';
 
 export interface ImpactEstimateInput {
   profile: HouseholdProfile;
@@ -106,18 +17,9 @@ export interface ImpactEstimateInput {
   schedule: HourlyScheduleSlot[];
   action: ActionId;
   forecast_pm25_hourly: number[];
-  /** Optional start clock hour for re-indexing raw forecast (e.g. 14 for 14:00) */
   start_clock_hour?: number;
-  /** Optional explicit seed for deterministic Monte Carlo reproducibility */
   seed?: number;
-  /** Number of Monte Carlo draws (default 120 uncached, >=300 cached) */
   num_draws?: number;
-}
-
-export interface SensitivityDriver {
-  parameter: string;
-  variance_share_pct: number;
-  plain_note: string;
 }
 
 export interface ImpactEstimateValue extends Record<string, unknown> {
@@ -133,8 +35,7 @@ export interface ImpactEstimateValue extends Record<string, unknown> {
   priors_version: string;
 }
 
-// Seeded Mulberry32 PRNG for deterministic reproducible Monte Carlo
-function createRng(seed: number): () => number {
+export function createRng(seed: number): () => number {
   let state = seed >>> 0;
   return () => {
     state |= 0;
@@ -145,10 +46,8 @@ function createRng(seed: number): () => number {
   };
 }
 
-// Calibrated quantile sampler from q10, median, q90
-function sampleTriangular(rng: () => number, q10: number, med: number, q90: number): number {
+export function sampleTriangular(rng: () => number, q10: number, med: number, q90: number): number {
   const u = rng();
-  // Calibrated scale factor ensuring 10th and 90th percentiles of output reflect input spread
   const minVal = Math.max(0.001, med - 1.35 * (med - q10));
   const maxVal = med + 1.35 * (q90 - med);
   const fc = (med - minVal) / Math.max(1e-6, maxVal - minVal);
@@ -158,32 +57,24 @@ function sampleTriangular(rng: () => number, q10: number, med: number, q90: numb
   return maxVal - Math.sqrt((1 - u) * (maxVal - minVal) * (maxVal - med));
 }
 
-function quantile(sorted: number[], q: number): number {
-  if (sorted.length === 0) return 0;
-  const pos = (sorted.length - 1) * q;
-  const base = Math.floor(pos);
-  const rest = pos - base;
-  const next = sorted[base + 1] ?? sorted[base];
-  return Math.round((sorted[base] + rest * (next - sorted[base])) * 10) / 10;
+export function getRoomVolumeM3(sizeBand: HouseholdProfile['home']['size_band']): number {
+  return ROOM_VOLUME_PRIORS[sizeBand]?.volume_m3 ?? 115;
 }
 
-function getRoomVolumeM3(sizeBand: HouseholdProfile['home']['size_band']): number {
-  if (sizeBand === 'small_under_40m2') return 65;
-  if (sizeBand === 'large_over_85m2') return 180;
-  return 115;
-}
-
-interface CachedImpactEntry {
+export interface CachedImpactEntry {
   envelope: ToolEnvelope<ImpactEstimateValue>;
   timestampMs: number;
 }
 
-const impactCache = new Map<string, CachedImpactEntry>();
+export const impactCache = new Map<string, CachedImpactEntry>();
 export const MAX_IMPACT_CACHE_SIZE = 250;
-const IMPACT_CACHE_TTL_MS = 15 * 60 * 1000; // 15 min TTL
+export const IMPACT_CACHE_TTL_MS = 15 * 60 * 1000;
 
 let mcHits = 0;
 let mcMisses = 0;
+
+export function recordMcHit(): void { mcHits++; }
+export function recordMcMiss(): void { mcMisses++; }
 
 export function getImpactCacheSize(): number {
   return impactCache.size;
@@ -209,7 +100,7 @@ export function clearImpactCache(): void {
   resetMonteCarloMetrics();
 }
 
-function computeImpactCacheKey(input: ImpactEstimateInput): string {
+export function computeImpactCacheKey(input: ImpactEstimateInput): string {
   const profileFeatures = [
     input.profile?.home?.size_band,
     input.profile?.home?.windows_habit,
@@ -236,7 +127,7 @@ export function impactEstimate(
   const cacheKey = computeImpactCacheKey(input);
   const cached = impactCache.get(cacheKey);
   if (cached && (Date.now() - cached.timestampMs) < IMPACT_CACHE_TTL_MS) {
-    mcHits++;
+    recordMcHit();
     return {
       ...cached.envelope,
       call_id: callId,
@@ -244,15 +135,15 @@ export function impactEstimate(
     };
   }
 
-  mcMisses++;
+  recordMcMiss();
   const draws = Math.max(40, Math.min(300, input.num_draws ?? 300));
   const rng = createRng(input.seed ?? 42019);
   const volume = getRoomVolumeM3(input.profile.home.size_band);
+
   const forecast = input.start_clock_hour !== undefined && input.start_clock_hour !== 0
     ? reindexForecastByClockHour(input.forecast_pm25_hourly, input.start_clock_hour)
     : input.forecast_pm25_hourly;
 
-  // Find cleanest afternoon hour index (usually indices 12..16) for time_shift_commute
   let cleanestHourIdx = 14;
   let minForecast = Infinity;
   for (let h = 11; h <= Math.min(17, forecast.length - 1); h++) {
@@ -262,134 +153,57 @@ export function impactEstimate(
     }
   }
 
+  const isLeaky =
+    input.profile.home.windows_habit === 'loose_frames_drafty' ||
+    input.profile.home.windows_habit === 'kept_open_day' ||
+    input.profile.home.windows_habit === 'kept_open_night';
+
   const dailyWithoutArr: number[] = [];
   const dailyWithArr: number[] = [];
   const dailyPctArr: number[] = [];
   const nightWithoutArr: number[] = [];
   const nightWithArr: number[] = [];
   const nightPctArr: number[] = [];
-
-  // Track parameter draw values vs reduction pct for simple variance attribution
-  const sampleRecords: Array<{
-    lam: number;
-    derate: number;
-    maskFit: number;
-    cooking: number;
-    pct: number;
-  }> = [];
+  const sampleRecords: SampleRecord[] = [];
 
   for (let i = 0; i < draws; i++) {
-    const isLeaky =
-      input.profile.home.windows_habit === 'loose_frames_drafty' ||
-      input.profile.home.windows_habit === 'kept_open_day' ||
-      input.profile.home.windows_habit === 'kept_open_night';
-
     const pBase = isLeaky
       ? sampleTriangular(rng, PARAMETER_PRIORS.penetration_leaky.q10, PARAMETER_PRIORS.penetration_leaky.median, PARAMETER_PRIORS.penetration_leaky.q90)
       : sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
+    const pSealed = sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
 
-    const pSealed = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.penetration_sealed.q10,
-      PARAMETER_PRIORS.penetration_sealed.median,
-      PARAMETER_PRIORS.penetration_sealed.q90
-    );
+    const lamDrafty = sampleTriangular(rng, PARAMETER_PRIORS.ach_drafty_closed.q10, PARAMETER_PRIORS.ach_drafty_closed.median, PARAMETER_PRIORS.ach_drafty_closed.q90);
+    const lamSealed = sampleTriangular(rng, PARAMETER_PRIORS.ach_sealed.q10, PARAMETER_PRIORS.ach_sealed.median, PARAMETER_PRIORS.ach_sealed.q90);
+    const lamOpen = sampleTriangular(rng, PARAMETER_PRIORS.ach_open_window.q10, PARAMETER_PRIORS.ach_open_window.median, PARAMETER_PRIORS.ach_open_window.q90);
+    const kDep = sampleTriangular(rng, PARAMETER_PRIORS.deposition_k.q10, PARAMETER_PRIORS.deposition_k.median, PARAMETER_PRIORS.deposition_k.q90);
 
-    const lamDrafty = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.ach_drafty_closed.q10,
-      PARAMETER_PRIORS.ach_drafty_closed.median,
-      PARAMETER_PRIORS.ach_drafty_closed.q90
-    );
-    const lamSealed = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.ach_sealed.q10,
-      PARAMETER_PRIORS.ach_sealed.median,
-      PARAMETER_PRIORS.ach_sealed.q90
-    );
-    const lamOpen = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.ach_open_window.q10,
-      PARAMETER_PRIORS.ach_open_window.median,
-      PARAMETER_PRIORS.ach_open_window.q90
-    );
+    const derateHepa = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_hepa.q10, PARAMETER_PRIORS.cadr_derating_hepa.median, PARAMETER_PRIORS.cadr_derating_hepa.q90);
+    const derateDiy = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_diy.q10, PARAMETER_PRIORS.cadr_derating_diy.median, PARAMETER_PRIORS.cadr_derating_diy.q90);
 
-    const kDep = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.deposition_k.q10,
-      PARAMETER_PRIORS.deposition_k.median,
-      PARAMETER_PRIORS.deposition_k.q90
-    );
+    const sCook = input.profile.home.cooking_fuel === 'induction_electric'
+      ? 900
+      : sampleTriangular(rng, PARAMETER_PRIORS.source_cooking_lpg.q10, PARAMETER_PRIORS.source_cooking_lpg.median, PARAMETER_PRIORS.source_cooking_lpg.q90);
 
-    const derateHepa = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.cadr_derating_hepa.q10,
-      PARAMETER_PRIORS.cadr_derating_hepa.median,
-      PARAMETER_PRIORS.cadr_derating_hepa.q90
-    );
-    const derateDiy = sampleTriangular(
-      rng,
-      PARAMETER_PRIORS.cadr_derating_diy.q10,
-      PARAMETER_PRIORS.cadr_derating_diy.median,
-      PARAMETER_PRIORS.cadr_derating_diy.q90
-    );
+    const maskFit = input.target_member_age_band === 'adult'
+      ? sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_adult.q10, PARAMETER_PRIORS.mask_n95_fit_adult.median, PARAMETER_PRIORS.mask_n95_fit_adult.q90)
+      : sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_child.q10, PARAMETER_PRIORS.mask_n95_fit_child.median, PARAMETER_PRIORS.mask_n95_fit_child.q90);
 
-    const sCook =
-      input.profile.home.cooking_fuel === 'induction_electric'
-        ? 900
-        : sampleTriangular(
-            rng,
-            PARAMETER_PRIORS.source_cooking_lpg.q10,
-            PARAMETER_PRIORS.source_cooking_lpg.median,
-            PARAMETER_PRIORS.source_cooking_lpg.q90
-          );
-
-    const maskFit =
-      input.target_member_age_band === 'infant_under_2'
-        ? 0
-        : input.target_member_age_band === 'child_2_12'
-          ? sampleTriangular(
-              rng,
-              PARAMETER_PRIORS.mask_n95_fit_child.q10,
-              PARAMETER_PRIORS.mask_n95_fit_child.median,
-              PARAMETER_PRIORS.mask_n95_fit_child.q90
-            )
-          : sampleTriangular(
-              rng,
-              PARAMETER_PRIORS.mask_n95_fit_adult.q10,
-              PARAMETER_PRIORS.mask_n95_fit_adult.median,
-              PARAMETER_PRIORS.mask_n95_fit_adult.q90
-            );
-
-    const ventMult = 0.8 + rng() * 0.4;
-
-    // Baseline hourly arrays
     const baseLamArr = forecast.map((_, h) => {
-      if (input.profile.home.windows_habit === 'kept_open_night' && (h < 7 || h >= 21)) {
-        return lamOpen;
-      }
-      if (input.profile.home.windows_habit === 'kept_open_day' && h >= 8 && h <= 18) {
-        return lamOpen;
-      }
+      if (input.profile.home.windows_habit === 'kept_open_night' && (h < 7 || h >= 21)) return lamOpen;
+      if (input.profile.home.windows_habit === 'kept_open_day' && h >= 8 && h <= 18) return lamOpen;
       return isLeaky ? lamDrafty : lamSealed;
     });
 
-    const baseSourceArr = forecast.map((_, h) => {
-      // Cooking spikes at hours 8, 13, 20
-      const cookSpike = h === 8 || h === 13 || h === 20 ? sCook : 0;
-      return cookSpike;
-    });
-
+    const baseSourceArr = forecast.map((_, h) => (COOKING_SCHEDULE_PRIORS.peak_hours.includes(h) ? sCook : 0));
     const baseCadr =
       input.action === 'run_purifier_presleep' || input.action === 'diy_filter'
         ? 0
         : input.profile.home.purifier.has && input.profile.home.purifier.type === 'hepa'
-          ? (input.profile.home.purifier.cadr_m3_hr ?? 300) * derateHepa
+          ? (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 300) * derateHepa
           : input.profile.home.purifier.has && input.profile.home.purifier.type === 'diy_cr_box'
-            ? (input.profile.home.purifier.cadr_m3_hr ?? 280) * derateDiy
+            ? (input.profile.home.purifier.cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 280) * derateDiy
             : 0;
 
-    // Apply action deltas
     let withP = pBase;
     const withLamArr = [...baseLamArr];
     const withSourceArr = [...baseSourceArr];
@@ -399,142 +213,98 @@ export function impactEstimate(
 
     if (input.action === 'close_windows_inversion') {
       for (let h = 0; h < withLamArr.length; h++) {
-        if (h <= 10 || h >= 20) {
-          if (input.profile.home.windows_habit === 'kept_open_night') {
-            withLamArr[h] = isLeaky ? lamDrafty : lamSealed;
-          } else {
-            // Latching loose frames tight during winter smog inversion peaks
-            withLamArr[h] = Math.min(withLamArr[h], isLeaky ? lamDrafty * 0.8 : lamSealed);
-          }
-        }
+        if (h <= 10 || h >= 20) withLamArr[h] = Math.min(withLamArr[h], isLeaky ? lamDrafty * 0.8 : lamSealed);
       }
     } else if (input.action === 'ventilate_afternoon_window') {
-      // Flushes air only during the cleanest afternoon dispersion window
-      // Crucially, it does NOT alter or seal the other 23 hours!
       withLamArr[cleanestHourIdx] = lamOpen;
     } else if (input.action === 'seal_gaps') {
-      // Correlated reduction: sealing gaps can never worsen penetration or draft
       withP = Math.min(pBase, isLeaky ? pSealed : pBase * 0.95);
       for (let h = 0; h < withLamArr.length; h++) {
         withLamArr[h] = Math.min(withLamArr[h], isLeaky ? lamSealed : baseLamArr[h] * 0.9);
       }
     } else if (input.action === 'run_purifier_presleep') {
-      const rated = input.profile.home.purifier.cadr_m3_hr && input.profile.home.purifier.cadr_m3_hr > 0
-        ? input.profile.home.purifier.cadr_m3_hr
+      const rated = ((input.profile.home.purifier as any).cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 320) > 0
+        ? ((input.profile.home.purifier as any).cadr_m3_hr ?? (input.profile.home.purifier as any).cadr ?? 320)
         : 320;
       withCadrArr = forecast.map((_, h) => (h <= 7 || h >= 21 ? rated * derateHepa : baseCadr));
     } else if (input.action === 'diy_filter') {
       const diyCadr = 280 * derateDiy;
       withCadrArr = forecast.map((_, h) => (h <= 7 || h >= 21 ? Math.max(baseCadr, diyCadr) : baseCadr));
     } else if (input.action === 'cook_with_hood_window') {
-      for (let h = 0; h < withSourceArr.length; h++) {
-        withSourceArr[h] = withSourceArr[h] * 0.25;
-      }
+      for (let h = 0; h < withSourceArr.length; h++) withSourceArr[h] *= 0.25;
     } else if (input.action === 'avoid_incense') {
       const hasIncense = Boolean(
         (input.profile.home as any)?.incense_or_dhoop ??
         (input.profile.home as any)?.incense_use ??
-        (input.profile as any)?.has_incense ??
-        false
+        (input.profile as any)?.has_incense
       );
       if (hasIncense) {
-        const sInc = sampleTriangular(
-          rng,
-          PARAMETER_PRIORS.source_incense_coil.q10,
-          PARAMETER_PRIORS.source_incense_coil.median,
-          PARAMETER_PRIORS.source_incense_coil.q90
-        );
-        baseSourceArr[19] += sInc; // Baseline has evening incense plume; action avoids it
+        const sInc = sampleTriangular(rng, PARAMETER_PRIORS.source_incense_coil.q10, PARAMETER_PRIORS.source_incense_coil.median, PARAMETER_PRIORS.source_incense_coil.q90);
+        baseSourceArr[19] += sInc;
       }
     } else if (input.action === 'time_shift_commute') {
-      // Strictly conserve 24 hours: vacated commute/outdoor hour becomes indoor home activity
-      const commuteSlots = input.schedule.filter((s) => s.micro_env === 'commute' || s.micro_env === 'outdoors');
-      if (commuteSlots.length > 0) {
-        const origHours = new Set(commuteSlots.map((s) => s.hour_index));
-        withSchedule = input.schedule.map((slot) => {
-          if (origHours.has(slot.hour_index)) {
-            return {
-              ...slot,
-              micro_env: 'home' as const,
-              activity: 'light' as const,
-              mask: 'none' as const,
-            };
-          }
-          if (slot.hour_index === cleanestHourIdx) {
-            const prime = commuteSlots[0];
-            return {
-              ...slot,
-              micro_env: prime.micro_env,
-              activity: prime.activity,
-              mask: prime.mask,
-              commute_mode: prime.commute_mode,
-            };
-          }
-          return slot;
-        });
-      }
+      withSchedule = input.schedule.map((slot) => {
+        const hour = (slot as any).hour ?? (slot as any).hour_index ?? 0;
+        const env = (slot as any).microenvironment ?? (slot as any).micro_env;
+        const isCommute = env === 'outdoor_commute' || env === 'commute';
+        if (hour >= 8 && hour <= 10 && isCommute) {
+          return { ...slot, microenvironment: 'home', micro_env: 'home', activity: 'rest' as const };
+        }
+        if (hour === cleanestHourIdx) {
+          const actType = (slot as any).activity === 'moderate' ? 'moderate' : 'light';
+          return { ...slot, microenvironment: 'outdoor_commute', micro_env: 'commute', activity: actType };
+        }
+        return slot;
+      });
     } else if (input.action === 'n95_on_commute') {
-      withMaskOverride = maskFit;
-      withSchedule = input.schedule.map((slot) =>
-        slot.micro_env === 'commute' || slot.micro_env === 'outdoors'
-          ? {
-              ...slot,
-              mask: input.target_member_age_band === 'infant_under_2' ? 'none' : 'n95_kn95_kf94',
-            }
-          : slot
-      );
+      if (input.target_member_age_band !== 'infant_under_2') withMaskOverride = maskFit;
     }
 
-    const indoorWithout = solveIndoorMassBalance({
+    const baseIndoor = solveIndoorMassBalance({
+      volume_m3: volume,
+      penetration_factor: pBase,
+      ach_hourly: baseLamArr,
+      deposition_rate_hourly: kDep,
+      cadr_hourly: forecast.map(() => baseCadr),
+      indoor_source_hourly: baseSourceArr,
       outdoor_pm25_hourly: forecast,
-      room_volume_m3: volume,
-      penetration_p: pBase,
-      lambda_ach: baseLamArr,
-      deposition_k: kDep,
-      source_ug_per_hr: baseSourceArr,
-      cadr_eff_m3_hr: baseCadr,
     });
 
-    const indoorWith = solveIndoorMassBalance({
+    const withIndoor = solveIndoorMassBalance({
+      volume_m3: volume,
+      penetration_factor: withP,
+      ach_hourly: withLamArr,
+      deposition_rate_hourly: kDep,
+      cadr_hourly: withCadrArr,
+      indoor_source_hourly: withSourceArr,
       outdoor_pm25_hourly: forecast,
-      room_volume_m3: volume,
-      penetration_p: withP,
-      lambda_ach: withLamArr,
-      deposition_k: kDep,
-      source_ug_per_hr: withSourceArr,
-      cadr_eff_m3_hr: withCadrArr,
     });
 
     const doseWithout = computeInhaledDose({
       age_band: input.target_member_age_band,
       schedule: input.schedule,
-      indoor_pm25_hourly: indoorWithout.hourly,
+      indoor_pm25_hourly: baseIndoor.hourly,
       outdoor_pm25_hourly: forecast,
-      ventilation_multiplier: ventMult,
     });
 
     const doseWith = computeInhaledDose({
       age_band: input.target_member_age_band,
       schedule: withSchedule,
-      indoor_pm25_hourly: indoorWith.hourly,
+      indoor_pm25_hourly: withIndoor.hourly,
       outdoor_pm25_hourly: forecast,
       mask_efficiency_override: withMaskOverride,
-      ventilation_multiplier: ventMult,
     });
 
-    const pctDaily =
-      doseWithout.dailyDoseUg > 0
-        ? ((doseWithout.dailyDoseUg - doseWith.dailyDoseUg) / doseWithout.dailyDoseUg) * 100
-        : 0;
-    const pctNight =
-      doseWithout.overnightDoseUg > 0
-        ? ((doseWithout.overnightDoseUg - doseWith.overnightDoseUg) / doseWithout.overnightDoseUg) * 100
-        : 0;
+    const pctDaily = doseWithout.dailyDoseUg > 0
+      ? ((doseWithout.dailyDoseUg - doseWith.dailyDoseUg) / doseWithout.dailyDoseUg) * 100
+      : 0;
+    const pctNight = doseWithout.overnightDoseUg > 0
+      ? ((doseWithout.overnightDoseUg - doseWith.overnightDoseUg) / doseWithout.overnightDoseUg) * 100
+      : 0;
 
     dailyWithoutArr.push(doseWithout.dailyDoseUg);
     dailyWithArr.push(doseWith.dailyDoseUg);
     dailyPctArr.push(pctDaily);
-
     nightWithoutArr.push(doseWithout.overnightDoseUg);
     nightWithArr.push(doseWith.overnightDoseUg);
     nightPctArr.push(pctNight);
@@ -562,7 +332,6 @@ export function impactEstimate(
   const pctMed = quantile(dPctS, 0.5);
   const pctQ90 = quantile(dPctS, 0.9);
 
-  // Derive confidence from relative interval width AND data completeness / assumed priors
   const spread = Math.abs(pctQ90 - pctQ10);
   const isAssumedData = input.profile.home.windows_habit === 'loose_frames_drafty' || input.forecast_pm25_hourly.length < 24;
   const actionAssumedPrior =
@@ -572,131 +341,19 @@ export function impactEstimate(
   const hasAssumed = isAssumedData || actionAssumedPrior;
   const confidence: ConfidenceLevel = (spread <= 14 && !hasAssumed) ? 'high' : (spread <= 28) ? 'medium' : 'low';
 
-  // Dynamic sensitivity attribution based on empirical sample variance decomposition
-  const topUncertainties: SensitivityDriver[] = [];
-  const meanPct = dPctS.reduce((a, b) => a + b, 0) / Math.max(1, dPctS.length);
-  const meanLam = sampleRecords.reduce((a, b) => a + b.lam, 0) / Math.max(1, sampleRecords.length);
-  const meanDerate = sampleRecords.reduce((a, b) => a + b.derate, 0) / Math.max(1, sampleRecords.length);
-  const meanFit = sampleRecords.reduce((a, b) => a + b.maskFit, 0) / Math.max(1, sampleRecords.length);
-
-  let covLam = 0, covDerate = 0, covFit = 0;
-  let varLam = 0, varDerate = 0, varFit = 0, varPct = 0;
-
-  for (const rec of sampleRecords) {
-    const dP = rec.pct - meanPct;
-    varPct += dP * dP;
-    const dL = rec.lam - meanLam;
-    covLam += dL * dP;
-    varLam += dL * dL;
-    const dD = rec.derate - meanDerate;
-    covDerate += dD * dP;
-    varDerate += dD * dD;
-    const dF = rec.maskFit - meanFit;
-    covFit += dF * dP;
-    varFit += dF * dF;
-  }
-
-  const sSqLam = varLam > 0 && varPct > 0 ? Math.pow(covLam, 2) / (varLam * varPct) : 0;
-  const sSqDerate = varDerate > 0 && varPct > 0 ? Math.pow(covDerate, 2) / (varDerate * varPct) : 0;
-  const sSqFit = varFit > 0 && varPct > 0 ? Math.pow(covFit, 2) / (varFit * varPct) : 0;
-
-  if (input.action === 'seal_gaps' || input.action === 'close_windows_inversion' || input.action === 'ventilate_afternoon_window') {
-    const weightLam = Math.max(0.1, sSqLam + 0.45);
-    const weightP = 0.25;
-    const totalW = weightLam + weightP;
-    const share1 = Math.round((weightLam / totalW) * 100);
-    const share2 = 100 - share1;
-    topUncertainties.push(
-      {
-        parameter: 'Window leakiness (λ)',
-        variance_share_pct: share1,
-        plain_note: 'The biggest uncertainty is how leaky your window and door frames are.',
-      },
-      {
-        parameter: 'Penetration factor (P)',
-        variance_share_pct: share2,
-        plain_note: 'Fine dust passing through narrow cracks varies by frame material.',
-      }
-    );
-  } else if (input.action === 'diy_filter' || input.action === 'run_purifier_presleep') {
-    const weightDerate = Math.max(0.1, sSqDerate + 0.35);
-    const weightLam = Math.max(0.1, sSqLam + 0.25);
-    const totalW = weightDerate + weightLam;
-    const share1 = Math.round((weightDerate / totalW) * 100);
-    const share2 = 100 - share1;
-    topUncertainties.push(
-      {
-        parameter: 'Real-world fan speed derating',
-        variance_share_pct: share1,
-        plain_note: 'Running on medium/quiet sleep mode delivers less airflow than max turbo rating.',
-      },
-      {
-        parameter: 'Window leakiness (λ)',
-        variance_share_pct: share2,
-        plain_note: 'Closed doors and sealed gaps multiply purifier effectiveness.',
-      }
-    );
-  } else if (input.action === 'n95_on_commute') {
-    const weightFit = Math.max(0.2, sSqFit + 0.5);
-    const weightOther = 0.25;
-    const totalW = weightFit + weightOther;
-    const share1 = Math.round((weightFit / totalW) * 100);
-    const share2 = 100 - share1;
-    topUncertainties.push(
-      {
-        parameter: 'Nose-wire & cheek seal fit',
-        variance_share_pct: share1,
-        plain_note: 'Even an N95 loses half its benefit if warm air leaks around the nose bridge.',
-      },
-      {
-        parameter: 'Breathing rate during commute',
-        variance_share_pct: share2,
-        plain_note: 'Brisk walking or cycling increases inhaled volume per hour.',
-      }
-    );
-  } else {
-    topUncertainties.push({
-      parameter: 'Indoor emission intensity & timing',
-      variance_share_pct: 100,
-      plain_note: 'Pan lids, stove flame height, and exhaust speed change peak smoke levels.',
-    });
-  }
+  const topUncertainties = deriveSensitivityDrivers(input.action, sampleRecords, dPctS);
 
   const envelope: ToolEnvelope<ImpactEstimateValue> = {
     call_id: callId,
     ok: true,
     value: {
       action: input.action,
-      daily_without_ug: {
-        q10: quantile(dOutS, 0.1),
-        median: medWithout,
-        q90: quantile(dOutS, 0.9),
-      },
-      daily_with_ug: {
-        q10: quantile(dInS, 0.1),
-        median: medWith,
-        q90: quantile(dInS, 0.9),
-      },
-      daily_reduction_pct: {
-        q10: pctQ10,
-        median: pctMed,
-        q90: pctQ90,
-      },
-      overnight_without_ug: {
-        q10: quantile(nOutS, 0.1),
-        median: quantile(nOutS, 0.5),
-        q90: quantile(nOutS, 0.9),
-      },
-      overnight_with_ug: {
-        q10: quantile(nInS, 0.1),
-        median: quantile(nInS, 0.5),
-        q90: quantile(nInS, 0.9),
-      },
-      overnight_reduction_pct: {
-        q10: quantile(nPctS, 0.1),
-        median: quantile(nPctS, 0.5),
-        q90: quantile(nPctS, 0.9),
-      },
+      daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
+      daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
+      daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
+      overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
+      overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
+      overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
       dose_avoided_median_ug: Math.round((medWithout - medWith) * 10) / 10,
       top_uncertainties: topUncertainties,
       priors_version: PRIORS_VERSION,
@@ -716,320 +373,4 @@ export function impactEstimate(
   impactCache.set(cacheKey, { envelope, timestampMs: Date.now() });
 
   return envelope;
-}
-
-export interface BatchImpactInput {
-  profile: HouseholdProfile;
-  target_member_age_band: AgeBand;
-  schedule: HourlyScheduleSlot[];
-  forecast_pm25_hourly: number[];
-  actions: ActionId[];
-  seed?: number;
-  num_draws?: number;
-  start_clock_hour?: number;
-}
-
-/**
- * Common Random Numbers (CRN) Batch Evaluator:
- * Simulates the baseline 24-hour differential equation once per draw across N draws,
- * and evaluates all candidate actions against that exact same environmental state.
- * Drastically reduces computation and eliminates simulation variance noise across actions.
- */
-export function batchEvaluateActionsCRN(
-  input: BatchImpactInput,
-  asOf = new Date().toISOString()
-): Map<ActionId, ToolEnvelope<ImpactEstimateValue>> {
-  const result = new Map<ActionId, ToolEnvelope<ImpactEstimateValue>>();
-  const missingActions: ActionId[] = [];
-
-  for (const action of input.actions) {
-    const singleInput: ImpactEstimateInput = {
-      profile: input.profile,
-      target_member_age_band: input.target_member_age_band,
-      schedule: input.schedule,
-      action,
-      forecast_pm25_hourly: input.forecast_pm25_hourly,
-      start_clock_hour: input.start_clock_hour,
-      seed: input.seed,
-      num_draws: input.num_draws,
-    };
-    const key = computeImpactCacheKey(singleInput);
-    const cached = impactCache.get(key);
-    if (cached && (Date.now() - cached.timestampMs) < IMPACT_CACHE_TTL_MS) {
-      mcHits++;
-      result.set(action, { ...cached.envelope, as_of: asOf });
-    } else {
-      missingActions.push(action);
-    }
-  }
-
-  if (missingActions.length === 0) {
-    return result;
-  }
-
-  const draws = Math.max(40, Math.min(300, input.num_draws ?? 150));
-  const rng = createRng(input.seed ?? 42019);
-  const volume = getRoomVolumeM3(input.profile.home.size_band);
-  const forecast = input.start_clock_hour !== undefined && input.start_clock_hour !== 0
-    ? reindexForecastByClockHour(input.forecast_pm25_hourly, input.start_clock_hour)
-    : input.forecast_pm25_hourly;
-
-  let cleanestHourIdx = 14;
-  let minForecast = Infinity;
-  for (let h = 11; h <= Math.min(17, forecast.length - 1); h++) {
-    if (forecast[h] < minForecast) {
-      minForecast = forecast[h];
-      cleanestHourIdx = h;
-    }
-  }
-
-  const isLeaky =
-    input.profile.home.windows_habit === 'loose_frames_drafty' ||
-    input.profile.home.windows_habit === 'kept_open_day' ||
-    input.profile.home.windows_habit === 'kept_open_night';
-
-  const isAssumedData = input.profile.home.windows_habit === 'loose_frames_drafty' || forecast.length < 24;
-  const confidence: ConfidenceLevel = isAssumedData ? 'low' : 'medium';
-
-  interface ActionAccumulator {
-    action: ActionId;
-    dailyWithArr: number[];
-    dailyPctArr: number[];
-    nightWithArr: number[];
-    nightPctArr: number[];
-  }
-
-  const actionAccs = new Map<ActionId, ActionAccumulator>();
-  for (const act of missingActions) {
-    actionAccs.set(act, {
-      action: act,
-      dailyWithArr: [],
-      dailyPctArr: [],
-      nightWithArr: [],
-      nightPctArr: [],
-    });
-  }
-
-  const dailyWithoutArr: number[] = [];
-  const nightWithoutArr: number[] = [];
-
-  for (let i = 0; i < draws; i++) {
-    const pBase = isLeaky
-      ? sampleTriangular(rng, PARAMETER_PRIORS.penetration_leaky.q10, PARAMETER_PRIORS.penetration_leaky.median, PARAMETER_PRIORS.penetration_leaky.q90)
-      : sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-    const pSealed = sampleTriangular(rng, PARAMETER_PRIORS.penetration_sealed.q10, PARAMETER_PRIORS.penetration_sealed.median, PARAMETER_PRIORS.penetration_sealed.q90);
-
-    const lamDrafty = sampleTriangular(rng, PARAMETER_PRIORS.ach_drafty_closed.q10, PARAMETER_PRIORS.ach_drafty_closed.median, PARAMETER_PRIORS.ach_drafty_closed.q90);
-    const lamSealed = sampleTriangular(rng, PARAMETER_PRIORS.ach_sealed.q10, PARAMETER_PRIORS.ach_sealed.median, PARAMETER_PRIORS.ach_sealed.q90);
-    const lamOpen = sampleTriangular(rng, PARAMETER_PRIORS.ach_open_window.q10, PARAMETER_PRIORS.ach_open_window.median, PARAMETER_PRIORS.ach_open_window.q90);
-    const kDep = sampleTriangular(rng, PARAMETER_PRIORS.deposition_k.q10, PARAMETER_PRIORS.deposition_k.median, PARAMETER_PRIORS.deposition_k.q90);
-
-    const derateHepa = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_hepa.q10, PARAMETER_PRIORS.cadr_derating_hepa.median, PARAMETER_PRIORS.cadr_derating_hepa.q90);
-    const derateDiy = sampleTriangular(rng, PARAMETER_PRIORS.cadr_derating_diy.q10, PARAMETER_PRIORS.cadr_derating_diy.median, PARAMETER_PRIORS.cadr_derating_diy.q90);
-
-    const sCook = input.profile.home.cooking_fuel === 'induction_electric'
-      ? 900
-      : sampleTriangular(rng, PARAMETER_PRIORS.source_cooking_lpg.q10, PARAMETER_PRIORS.source_cooking_lpg.median, PARAMETER_PRIORS.source_cooking_lpg.q90);
-
-    const maskFitChild = sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_child.q10, PARAMETER_PRIORS.mask_n95_fit_child.median, PARAMETER_PRIORS.mask_n95_fit_child.q90);
-    const maskFitAdult = sampleTriangular(rng, PARAMETER_PRIORS.mask_n95_fit_adult.q10, PARAMETER_PRIORS.mask_n95_fit_adult.median, PARAMETER_PRIORS.mask_n95_fit_adult.q90);
-
-    // Baseline (without actions) solved ONCE per draw
-    const baseLamArr = forecast.map((_, h) => {
-      if (input.profile.home.windows_habit === 'kept_open_day' && h >= 8 && h <= 18) return lamOpen;
-      if (input.profile.home.windows_habit === 'kept_open_night' && (h >= 20 || h <= 7)) return lamOpen;
-      return isLeaky ? lamDrafty : lamSealed;
-    });
-
-    const baseSourceArr = forecast.map((_, h) => (h === 8 || h === 13 || h === 20 ? sCook : 0));
-    const baseCadr = input.profile.home.purifier.has && input.profile.home.purifier.type === 'hepa'
-      ? (input.profile.home.purifier.cadr_m3_hr ?? 300) * derateHepa
-      : input.profile.home.purifier.has && input.profile.home.purifier.type === 'diy_cr_box'
-        ? (input.profile.home.purifier.cadr_m3_hr ?? 280) * derateDiy
-        : 0;
-
-    const baseIndoor = solveIndoorMassBalance({
-      room_volume_m3: volume,
-      penetration_p: pBase,
-      deposition_k: kDep,
-      lambda_ach: baseLamArr,
-      cadr_eff_m3_hr: baseCadr,
-      outdoor_pm25_hourly: forecast,
-      source_ug_per_hr: baseSourceArr,
-    });
-
-    const baseDose = computeInhaledDose({
-      age_band: input.target_member_age_band,
-      schedule: input.schedule,
-      indoor_pm25_hourly: baseIndoor.hourly,
-      outdoor_pm25_hourly: forecast,
-    });
-
-    dailyWithoutArr.push(baseDose.dailyDoseUg);
-    nightWithoutArr.push(baseDose.overnightDoseUg);
-
-    // Evaluate each action against the same draw
-    for (const act of missingActions) {
-      const acc = actionAccs.get(act)!;
-      let withP = pBase;
-      const withLamArr = [...baseLamArr];
-      const withSourceArr = [...baseSourceArr];
-      let withCadrArr = forecast.map(() => baseCadr);
-      let withSchedule = input.schedule;
-      let withMaskOverride: number | undefined = undefined;
-
-      if (act === 'close_windows_inversion') {
-        for (let h = 0; h < withLamArr.length; h++) {
-          if (h <= 10 || h >= 20) {
-            withLamArr[h] = input.profile.home.windows_habit === 'kept_open_night'
-              ? (isLeaky ? lamDrafty : lamSealed)
-              : Math.min(withLamArr[h], isLeaky ? lamDrafty * 0.8 : lamSealed);
-          }
-        }
-      } else if (act === 'ventilate_afternoon_window') {
-        withLamArr[cleanestHourIdx] = lamOpen;
-      } else if (act === 'seal_gaps') {
-        withP = Math.min(pBase, isLeaky ? pSealed : pBase * 0.95);
-        for (let h = 0; h < withLamArr.length; h++) {
-          withLamArr[h] = Math.min(withLamArr[h], isLeaky ? lamSealed : baseLamArr[h] * 0.9);
-        }
-      } else if (act === 'run_purifier_presleep') {
-        const rated = input.profile.home.purifier.cadr_m3_hr && input.profile.home.purifier.cadr_m3_hr > 0
-          ? input.profile.home.purifier.cadr_m3_hr
-          : 320;
-        withCadrArr = forecast.map((_, h) => (h <= 7 || h >= 21 ? rated * derateHepa : baseCadr));
-      } else if (act === 'diy_filter') {
-        const diyCadr = 280 * derateDiy;
-        withCadrArr = forecast.map((_, h) => (h <= 7 || h >= 21 ? Math.max(baseCadr, diyCadr) : baseCadr));
-      } else if (act === 'cook_with_hood_window') {
-        for (let h = 0; h < withSourceArr.length; h++) withSourceArr[h] *= 0.25;
-      } else if (act === 'avoid_incense') {
-        const hasIncense = Boolean(
-          (input.profile.home as any)?.incense_or_dhoop ??
-          (input.profile.home as any)?.incense_use ??
-          (input.profile as any)?.has_incense ??
-          false
-        );
-        if (hasIncense) {
-          const sInc = sampleTriangular(rng, PARAMETER_PRIORS.source_incense_coil.q10, PARAMETER_PRIORS.source_incense_coil.median, PARAMETER_PRIORS.source_incense_coil.q90);
-          baseSourceArr.forEach((_, h) => { if (h >= 18 && h <= 21) baseSourceArr[h] += sInc; });
-        }
-      } else if (act === 'n95_on_commute') {
-        withMaskOverride = input.target_member_age_band === 'child_2_12' ? maskFitChild : maskFitAdult;
-        withSchedule = input.schedule.map((slot) => slot.micro_env === 'commute' ? { ...slot, mask: 'n95_kn95_kf94' as const } : slot);
-      } else if (act === 'time_shift_commute') {
-        withSchedule = input.schedule.map((slot) => {
-          if (slot.micro_env === 'commute') return { ...slot, hour_index: cleanestHourIdx };
-          if (slot.hour_index === cleanestHourIdx) return { ...slot, hour_index: 8, micro_env: 'home' as const };
-          return slot;
-        });
-      }
-
-      const withIndoor = solveIndoorMassBalance({
-        room_volume_m3: volume,
-        penetration_p: withP,
-        deposition_k: kDep,
-        lambda_ach: withLamArr,
-        cadr_eff_m3_hr: withCadrArr,
-        outdoor_pm25_hourly: forecast,
-        source_ug_per_hr: withSourceArr,
-      });
-
-      const withDose = computeInhaledDose({
-        age_band: input.target_member_age_band,
-        schedule: withSchedule,
-        indoor_pm25_hourly: withIndoor.hourly,
-        outdoor_pm25_hourly: forecast,
-        mask_efficiency_override: withMaskOverride,
-      });
-
-      let dailyPct = baseDose.dailyDoseUg > 0
-        ? Math.round(((baseDose.dailyDoseUg - withDose.dailyDoseUg) / baseDose.dailyDoseUg) * 1000) / 10
-        : 0;
-      let nightPct = baseDose.overnightDoseUg > 0
-        ? Math.round(((baseDose.overnightDoseUg - withDose.overnightDoseUg) / baseDose.overnightDoseUg) * 1000) / 10
-        : 0;
-
-      if (act === 'seal_gaps' || act === 'close_windows_inversion') {
-        dailyPct = Math.max(0, dailyPct);
-        nightPct = Math.max(0, nightPct);
-      }
-
-      acc.dailyWithArr.push(withDose.dailyDoseUg);
-      acc.dailyPctArr.push(dailyPct);
-      acc.nightWithArr.push(withDose.overnightDoseUg);
-      acc.nightPctArr.push(nightPct);
-    }
-  }
-
-  const dOutS = [...dailyWithoutArr].sort((a, b) => a - b);
-  const nOutS = [...nightWithoutArr].sort((a, b) => a - b);
-  const medWithout = quantile(dOutS, 0.5);
-
-  for (const act of missingActions) {
-    mcMisses++;
-    const acc = actionAccs.get(act)!;
-    const dInS = [...acc.dailyWithArr].sort((a, b) => a - b);
-    const dPctS = [...acc.dailyPctArr].sort((a, b) => a - b);
-    const nInS = [...acc.nightWithArr].sort((a, b) => a - b);
-    const nPctS = [...acc.nightPctArr].sort((a, b) => a - b);
-
-    const medWith = quantile(dInS, 0.5);
-    let pctQ10 = quantile(dPctS, 0.1);
-    let pctMed = quantile(dPctS, 0.5);
-    let pctQ90 = quantile(dPctS, 0.9);
-
-    if (act === 'seal_gaps' || act === 'close_windows_inversion') {
-      pctQ10 = Math.max(0, pctQ10);
-      pctMed = Math.max(0, pctMed);
-      pctQ90 = Math.max(0, pctQ90);
-    }
-
-    const envelope: ToolEnvelope<ImpactEstimateValue> = {
-      call_id: `imp_${act}`,
-      ok: true,
-      value: {
-        action: act,
-        daily_without_ug: { q10: quantile(dOutS, 0.1), median: medWithout, q90: quantile(dOutS, 0.9) },
-        daily_with_ug: { q10: quantile(dInS, 0.1), median: medWith, q90: quantile(dInS, 0.9) },
-        daily_reduction_pct: { q10: pctQ10, median: pctMed, q90: pctQ90 },
-        overnight_without_ug: { q10: quantile(nOutS, 0.1), median: quantile(nOutS, 0.5), q90: quantile(nOutS, 0.9) },
-        overnight_with_ug: { q10: quantile(nInS, 0.1), median: quantile(nInS, 0.5), q90: quantile(nInS, 0.9) },
-        overnight_reduction_pct: { q10: quantile(nPctS, 0.1), median: quantile(nPctS, 0.5), q90: quantile(nPctS, 0.9) },
-        dose_avoided_median_ug: Math.round(Math.max(0, medWithout - medWith) * 10) / 10,
-        top_uncertainties: [
-          { parameter: 'infiltration_ach', variance_share_pct: 55, plain_note: 'Room leakage and wind draft' },
-          { parameter: 'deposition_k', variance_share_pct: 25, plain_note: 'Indoor particle settling rate' },
-          { parameter: 'cooking_source', variance_share_pct: 20, plain_note: 'Stove combustion emission' },
-        ],
-        priors_version: PRIORS_VERSION,
-      },
-      unit: 'ug',
-      range: [quantile(dInS, 0.1), quantile(dInS, 0.9)],
-      confidence,
-      source: `NIRVAAT Monte Carlo Impact Engine v${PRIORS_VERSION} (N=${draws} CRN draws)`,
-      as_of: asOf,
-      notes: 'Single-zone PM2.5 estimate; not a clinical risk score.',
-    };
-
-    const singleInput: ImpactEstimateInput = {
-      profile: input.profile,
-      target_member_age_band: input.target_member_age_band,
-      schedule: input.schedule,
-      action: act,
-      forecast_pm25_hourly: input.forecast_pm25_hourly,
-      start_clock_hour: input.start_clock_hour,
-      seed: input.seed,
-      num_draws: input.num_draws,
-    };
-    const key = computeImpactCacheKey(singleInput);
-    if (impactCache.size >= MAX_IMPACT_CACHE_SIZE) {
-      const oldestKey = impactCache.keys().next().value;
-      if (typeof oldestKey === 'string') impactCache.delete(oldestKey);
-    }
-    impactCache.set(key, { envelope, timestampMs: Date.now() });
-    result.set(act, envelope);
-  }
-
-  return result;
 }

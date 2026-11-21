@@ -3,7 +3,7 @@ import test from 'node:test';
 import { JSDOM } from 'jsdom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
-import { PlanRenderer } from '../src/components/PlanRenderer.tsx';
+import { PlanRenderer } from '../src/features/today/PlanRenderer.tsx';
 import { PlanQueryBar } from '../src/components/PlanQueryBar.tsx';
 import { STRINGS } from '../src/i18n/strings.ts';
 import { NirvaatPlanResponse } from '../src/shared/nirvaatTypes.ts';

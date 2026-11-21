@@ -1,4 +1,4 @@
-import { CheckCircle2, Eye, History, ShieldCheck, Sliders, Trash2, Wrench } from 'lucide-react';
+import { CheckCircle2, Eye, ShieldCheck, Sliders, Wrench } from 'lucide-react';
 import React from 'react';
 import { UiLang } from '../i18n/strings';
 import {
@@ -6,6 +6,7 @@ import {
   SavedDecisionRecord,
   ToolCallTrace,
 } from '../shared/nirvaatTypes';
+import { HistoryList } from '../features/audit/HistoryList';
 
 interface AuditAndSettingsViewProps {
   traces: ToolCallTrace[];
@@ -176,51 +177,11 @@ export const AuditAndSettingsView: React.FC<AuditAndSettingsViewProps> = ({
       </div>
 
       {/* Saved Decisions History */}
-      <section className="aurora-surface rounded-2xl p-5 space-y-3">
-        <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
-          <History className="h-4 w-4 text-teal-700" aria-hidden="true" />
-          <span>Saved Decision History ({history.length})</span>
-        </h3>
-        {history.length === 0 ? (
-          <p className="text-xs text-slate-600">
-            No saved plans yet. Generate a plan on the Today tab and click &ldquo;Save Plan&rdquo; to store it here.
-          </p>
-        ) : (
-          <div className="divide-y divide-slate-200/80 rounded-xl border border-slate-200 bg-white">
-            {history.map((rec) => (
-              <div
-                key={rec.id}
-                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-xs"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="font-semibold text-slate-900 truncate">{rec.query}</p>
-                  <p className="text-slate-500 font-mono tabular-nums">
-                    {rec.region_label} · {rec.channel} · {rec.plan.data_status} ·{' '}
-                    {new Date(rec.created_at).toLocaleString()}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => onLoadHistory(rec)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-800 hover:bg-slate-50"
-                  >
-                    Open Plan
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDeleteHistory(rec.id)}
-                    aria-label="Delete saved plan"
-                    className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-red-700"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <HistoryList
+        history={history}
+        onLoadHistory={onLoadHistory}
+        onDeleteHistory={onDeleteHistory}
+      />
 
       {/* Strict Auditor V1-V8 & Tool Provenance Trace */}
       <section className="aurora-surface rounded-2xl p-5 space-y-4">
@@ -258,26 +219,15 @@ export const AuditAndSettingsView: React.FC<AuditAndSettingsViewProps> = ({
               return (
                 <div
                   key={t.call_id}
-                  className={`rounded-xl border p-3.5 text-xs ${
-                    isHighlighted
-                      ? 'border-indigo-600 bg-indigo-50/70'
-                      : 'border-slate-200 bg-white'
-                  }`}
+                  className={`rounded-xl border p-3.5 text-xs ${isHighlighted ? 'border-indigo-600 bg-indigo-50/70' : 'border-slate-200 bg-white'}`}
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 font-mono tabular-nums">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2
-                        className={`h-3.5 w-3.5 ${
-                          t.status === 'ok' ? 'text-emerald-700' : 'text-amber-700'
-                        }`}
-                        aria-hidden="true"
-                      />
+                      <CheckCircle2 className={`h-3.5 w-3.5 ${t.status === 'ok' ? 'text-emerald-700' : 'text-amber-700'}`} aria-hidden="true" />
                       <span className="font-semibold text-slate-900">{t.tool_name}</span>
                       <span className="text-slate-500">id: {t.call_id}</span>
                     </div>
-                    <span className="text-slate-500">
-                      {t.status.toUpperCase()} · {t.duration_ms}ms
-                    </span>
+                    <span className="text-slate-500">{t.status.toUpperCase()} · {t.duration_ms}ms</span>
                   </div>
                   <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-50 p-2.5 text-[11px] font-mono text-slate-800">
                     {JSON.stringify(t.result, null, 2)}

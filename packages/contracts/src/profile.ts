@@ -59,9 +59,21 @@ export type RegionConfig = z.infer<typeof RegionConfigSchema>;
 
 export const ChannelSchema = z.enum(['WHATSAPP', 'SMS', 'APP', 'VOICE']);
 export type Channel = z.infer<typeof ChannelSchema>;
+export type ChannelType = Channel;
+
+export const DegradationSimulationSchema = z.enum([
+  'none',
+  'no_aq',
+  'stale_aq',
+  'bad_coords',
+  'unsupported_region',
+  'no_impact',
+  'all_down',
+]);
+export type DegradationSimulation = z.infer<typeof DegradationSimulationSchema>;
 
 export const RuntimeContextSchema = z.object({
-  now: z.string().min(10),
+  now: z.string().min(10).optional(),
   locale: z.string().trim().min(2).max(16),
   channel: ChannelSchema,
   region: RegionConfigSchema,
@@ -72,5 +84,6 @@ export const RuntimeContextSchema = z.object({
     user_feedback: z.string().max(300).nullable(),
     unresolved_question: z.string().max(200).nullable(),
   }),
+  simulated_degradation: DegradationSimulationSchema.optional(),
 });
 export type RuntimeContext = z.infer<typeof RuntimeContextSchema>;
