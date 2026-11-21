@@ -13,7 +13,8 @@
     "test:coverage": "tsx --test --experimental-test-coverage packages/engines/tests/engines.test.ts tests/*.test.ts tests/*.test.tsx",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "benchmark": "tsx scripts/benchmark_api.ts"
   },
   "dependencies": {
     "@google/genai": "^3.6.1",

@@ -29,7 +29,7 @@ interface TodayBentoProps {
   strings: typeof STRINGS['en'];
 }
 
-export const TodayBento: React.FC<TodayBentoProps> = ({
+export const TodayBento = React.memo<TodayBentoProps>(({
   selectedRegion,
   profile,
   presets,
@@ -132,4 +132,4 @@ export const TodayBento: React.FC<TodayBentoProps> = ({
       </div>
     </section>
   );
-};
+});

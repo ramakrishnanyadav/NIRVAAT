@@ -10,17 +10,19 @@ import {
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation, Link, NavLink } from 'react-router-dom';
 import { MotionConfig } from 'motion/react';
-import { AuditAndSettingsView } from './components/AuditAndSettingsView';
 import { BreathOrb } from './components/BreathOrb';
 import { CommandItem, CommandPalette } from './components/CommandPalette';
-import { EmergencyView } from './components/EmergencyView';
-import { HouseholdTwin } from './components/HouseholdTwin';
-import { InversionTimeline } from './components/InversionTimeline';
-import { LearnView } from './components/LearnView';
 import { PlanQueryBar } from './components/PlanQueryBar';
 import { PlanRenderer } from './components/PlanRenderer';
-import { TodayBento } from './components/TodayBento';
 import { WorkspaceToolbar } from './components/WorkspaceToolbar';
+
+// Task 4: Route-level code-splitting (React.lazy)
+const TodayBento = React.lazy(() => import('./components/TodayBento').then((m) => ({ default: m.TodayBento })));
+const InversionTimeline = React.lazy(() => import('./components/InversionTimeline').then((m) => ({ default: m.InversionTimeline })));
+const HouseholdTwin = React.lazy(() => import('./components/HouseholdTwin').then((m) => ({ default: m.HouseholdTwin })));
+const LearnView = React.lazy(() => import('./components/LearnView').then((m) => ({ default: m.LearnView })));
+const AuditAndSettingsView = React.lazy(() => import('./components/AuditAndSettingsView').then((m) => ({ default: m.AuditAndSettingsView })));
+const EmergencyView = React.lazy(() => import('./components/EmergencyView').then((m) => ({ default: m.EmergencyView })));
 import { STRINGS, UiLang } from './i18n/strings';
 import {
   AirQualitySummary,
@@ -701,7 +703,17 @@ export default function App() {
 
       {/* Main Content Viewport */}
       <main id="main-content" role="main" tabIndex={-1} className="mx-auto max-w-[1280px] px-4 py-6 pb-24 sm:px-6 md:pb-12 outline-none">
-        {route === 'emergency' ? (
+        <React.Suspense
+          fallback={
+            <div className="flex items-center justify-center py-24" role="status" aria-live="polite">
+              <div className="flex items-center gap-2.5 text-sm font-medium text-slate-600">
+                <Loader2 className="h-5 w-5 animate-spin text-teal-700" aria-hidden="true" />
+                <span>Loading view...</span>
+              </div>
+            </div>
+          }
+        >
+          {route === 'emergency' ? (
           <EmergencyView
             emergencyNumber={selectedRegion.emergency_number}
             lang={lang}
@@ -992,6 +1004,7 @@ export default function App() {
             )}
           </div>
         )}
+        </React.Suspense>
       </main>
 
       {/* Optimistic Mark-Done Undo Toast */}

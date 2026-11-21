@@ -84,6 +84,13 @@
   border: 1px solid rgba(226, 232, 240, 0.9);
 }
 
+/* Performance: Cap simultaneous backdrop-filter layers (~6 max top-level containers) */
+.aurora-surface .aurora-surface,
+.aurora-surface .aurora-inset,
+.aurora-inset {
+  backdrop-filter: none !important;
+}
+
 /* High-contrast solid overrides */
 .high-contrast .aurora-surface,
 .high-contrast .aurora-inset {

@@ -92,7 +92,7 @@ function reduceMotionAware(count: number): number {
   return count;
 }
 
-export const BreathOrb: React.FC<BreathOrbProps> = ({
+export const BreathOrb = React.memo<BreathOrbProps>(({
   pm25,
   pm25Range,
   asOf,
@@ -183,4 +183,4 @@ export const BreathOrb: React.FC<BreathOrbProps> = ({
       </div>
     </div>
   );
-};
+});

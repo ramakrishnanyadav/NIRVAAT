@@ -4,6 +4,35 @@ import request from 'supertest';
 import { app } from '../server.ts';
 import { WORKED_SCENARIOS } from '../packages/engines/src/index.ts';
 
+// Deterministic mock for Open-Meteo to isolate tests from live external networks
+const originalFetch = globalThis.fetch;
+globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const urlStr = String(input);
+  if (urlStr.includes('open-meteo.com')) {
+    const mockPayload = {
+      current: {
+        time: '2026-11-21T05:00',
+        pm2_5: 280.5,
+        pm10: 420.0,
+        us_aqi: 340,
+        european_aqi: 90,
+        nitrogen_dioxide: 65.2,
+      },
+      hourly: {
+        time: Array.from({ length: 24 }, (_, i) => `2026-11-21T${String(i).padStart(2, '0')}:00`),
+        pm2_5: Array.from({ length: 24 }, () => 280),
+        pm10: Array.from({ length: 24 }, () => 420),
+        us_aqi: Array.from({ length: 24 }, () => 340),
+      },
+    };
+    return new Response(JSON.stringify(mockPayload), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  return originalFetch(input, init);
+}) as typeof fetch;
+
 const baseRuntime = {
   locale: 'en-IN',
   channel: 'APP' as const,

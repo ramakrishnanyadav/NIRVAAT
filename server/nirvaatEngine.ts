@@ -8,13 +8,46 @@ import {
 } from '../src/shared/nirvaatTypes.ts';
 import { executeNirvaatTool } from './nirvaatTools.ts';
 
-const MODEL_FALLBACK_LADDER = [
-  'gemini-4-hydrogen',
-  'gemini-3.1-flash-lite',
-  'gemini-flash-latest',
-  'gemini-3.6-flash',
-  'gemini-3.7-flash',
-] as const;
+export const MODEL_CONFIG = {
+  extraction: process.env.GEMINI_EXTRACTION_MODEL || 'gemini-2.5-flash',
+  explanation: process.env.GEMINI_EXPLANATION_MODEL || 'gemini-2.5-flash',
+  fallbackCandidates: [
+    process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    'gemini-1.5-flash',
+    'gemini-flash-latest',
+  ],
+};
+
+let activeVerifiedModel: string = MODEL_CONFIG.explanation;
+let lastModelHealthCheckMs = 0;
+const HEALTH_CHECK_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+export async function getHealthyModel(): Promise<string> {
+  const now = Date.now();
+  if (activeVerifiedModel && (now - lastModelHealthCheckMs) < HEALTH_CHECK_TTL_MS) {
+    return activeVerifiedModel;
+  }
+
+  const ai = getAiClient();
+  for (const candidate of MODEL_CONFIG.fallbackCandidates) {
+    try {
+      await ai.models.generateContent({
+        model: candidate,
+        contents: [{ role: 'user', parts: [{ text: 'healthcheck' }] }],
+      });
+      activeVerifiedModel = candidate;
+      lastModelHealthCheckMs = now;
+      console.log(`[LLM Model Health] Pinned active healthy model: ${candidate}`);
+      return candidate;
+    } catch {
+      // try next candidate
+    }
+  }
+
+  activeVerifiedModel = 'gemini-2.5-flash';
+  lastModelHealthCheckMs = now;
+  return activeVerifiedModel;
+}
 
 let cachedAiClient: GoogleGenAI | null = null;
 
@@ -47,29 +80,37 @@ function isRecoverableModelError(err: unknown): boolean {
 }
 
 async function generateContentWithFallback(
-  params: Omit<Parameters<GoogleGenAI['models']['generateContent']>[0], 'model'>
+  params: Omit<Parameters<GoogleGenAI['models']['generateContent']>[0], 'model'>,
+  purpose: 'extraction' | 'explanation' = 'explanation'
 ): Promise<{ response: Awaited<ReturnType<GoogleGenAI['models']['generateContent']>>; modelUsed: string }> {
   const ai = getAiClient();
-  let lastError: unknown = null;
+  const targetModel = purpose === 'extraction' ? MODEL_CONFIG.extraction : activeVerifiedModel;
 
-  for (const model of MODEL_FALLBACK_LADDER) {
-    try {
-      const response = await ai.models.generateContent({
-        model,
-        ...params,
-      });
-      return { response, modelUsed: model };
-    } catch (err) {
-      lastError = err;
-      if (!isRecoverableModelError(err)) {
-        throw err;
+  try {
+    const response = await ai.models.generateContent({
+      model: targetModel,
+      ...params,
+    });
+    return { response, modelUsed: targetModel };
+  } catch (err) {
+    if (isRecoverableModelError(err)) {
+      for (const fallback of MODEL_CONFIG.fallbackCandidates) {
+        if (fallback === targetModel) continue;
+        try {
+          const response = await ai.models.generateContent({
+            model: fallback,
+            ...params,
+          });
+          activeVerifiedModel = fallback;
+          lastModelHealthCheckMs = Date.now();
+          return { response, modelUsed: fallback };
+        } catch {
+          // continue fallback
+        }
       }
     }
+    throw err;
   }
-
-  throw lastError instanceof Error
-    ? lastError
-    : new Error('All fallback Gemini models failed to respond.');
 }
 
 // H3: Deterministic Red-Flag Symptom Pre-Screen (English + Hinglish + Hindi Devanagari)
@@ -828,15 +869,18 @@ export async function runNirvaatCopilot(
     let modelUsed = 'gemini-4-hydrogen';
     let draftJsonText = '';
 
-    // Step 1: Tool-use loop (up to 4 turns so Gemini calls AQ, forecast, guidance, impact_estimate)
-    for (let round = 0; round < 4; round++) {
-      const { response, modelUsed: used } = await generateContentWithFallback({
-        contents: contents as never,
-        config: {
-          systemInstruction,
-          tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+    // Step 1: Tool-use loop (strictly capped to 2 rounds for optimal latency and token cost)
+    for (let round = 0; round < 2; round++) {
+      const { response, modelUsed: used } = await generateContentWithFallback(
+        {
+          contents: contents as never,
+          config: {
+            systemInstruction,
+            tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
+          },
         },
-      });
+        'extraction'
+      );
       modelUsed = used;
 
       const modelContent = response.candidates?.[0]?.content;
@@ -911,14 +955,17 @@ export async function runNirvaatCopilot(
         { role: 'user' as const, parts: promptParts },
       ];
 
-      const { response, modelUsed: used } = await generateContentWithFallback({
-        contents: finalContents as never,
-        config: {
-          systemInstruction,
-          responseMimeType: 'application/json',
-          responseSchema: OUTPUT_RESPONSE_SCHEMA as never,
+      const { response, modelUsed: used } = await generateContentWithFallback(
+        {
+          contents: finalContents as never,
+          config: {
+            systemInstruction,
+            responseMimeType: 'application/json',
+            responseSchema: OUTPUT_RESPONSE_SCHEMA as never,
+          },
         },
-      });
+        'explanation'
+      );
       modelUsed = used;
 
       const rawText = (response.text ?? '').trim();

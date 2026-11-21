@@ -7,6 +7,9 @@ import {
   RuntimeContext,
   ToolCallTrace,
 } from '../src/shared/nirvaatTypes.ts';
+import { reindexForecastByClockHour } from '../packages/engines/src/index.ts';
+
+export { reindexForecastByClockHour };
 
 export const PRESET_REGIONS: RegionConfig[] = [
   {
@@ -192,12 +195,31 @@ const aqCache = new Map<string, CachedAQEntry>();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_AQ_CACHE_SIZE = 120;
 
+let aqHits = 0;
+let aqMisses = 0;
+
 export function getAqCacheSize(): number {
   return aqCache.size;
 }
 
-export function clearAqCache(): void {
+export function getAqMetrics() {
+  const total = aqHits + aqMisses;
+  return {
+    hits: aqHits,
+    misses: aqMisses,
+    hit_rate_pct: total > 0 ? Math.round((aqHits / total) * 10000) / 100 : 0,
+    cached_entries: aqCache.size,
+  };
+}
+
+export function resetAqMetrics(): void {
+  aqHits = 0;
+  aqMisses = 0;
   aqCache.clear();
+}
+
+export function clearAqCache(): void {
+  resetAqMetrics();
 }
 
 function pruneAqCache(): void {
@@ -274,9 +296,12 @@ export async function fetchLiveAirQualitySummary(
   const lat = roundCoarseCoord(region.latitude);
   const lon = roundCoarseCoord(region.longitude);
   const gridId = `${lat.toFixed(2)}_${lon.toFixed(2)}`;
-  const cached = aqCache.get(gridId);
+  const currentHourKey = new Date().toISOString().slice(0, 13);
+  const cacheKey = `${gridId}_${currentHourKey}`;
+  const cached = aqCache.get(cacheKey) || aqCache.get(gridId);
 
   if (cached && Date.now() - cached.fetchedAtMs < CACHE_TTL_MS) {
+    aqHits++;
     const ageMin = Math.max(0, Math.round((Date.now() - new Date(cached.summary.as_of).getTime()) / 60000));
     return {
       ok: true,
@@ -288,6 +313,8 @@ export async function fetchLiveAirQualitySummary(
       },
     };
   }
+
+  aqMisses++;
 
   const url = new URL('https://air-quality-api.open-meteo.com/v1/air-quality');
   url.searchParams.set('latitude', String(lat));
@@ -345,6 +372,9 @@ export async function fetchLiveAirQualitySummary(
     const ageMin = 0;
 
     const times = raw.hourly?.time ?? [];
+    if (times.length > 0) {
+      console.log('[Open-Meteo Telemetry] hourly.time[0]:', times[0]);
+    }
     const hourlyPm25 = raw.hourly?.pm2_5 ?? [];
     const hourlyPm10 = raw.hourly?.pm10 ?? [];
     const hourlyUsAqi = raw.hourly?.us_aqi ?? [];
@@ -381,6 +411,7 @@ export async function fetchLiveAirQualitySummary(
     };
 
     pruneAqCache();
+    aqCache.set(cacheKey, { fetchedAtMs: Date.now(), summary });
     aqCache.set(gridId, { fetchedAtMs: Date.now(), summary });
     return { ok: true, data: summary };
   } catch (err) {

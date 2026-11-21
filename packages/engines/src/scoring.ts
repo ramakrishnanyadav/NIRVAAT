@@ -1,7 +1,7 @@
 import { AgeBand, HouseholdProfile } from '../../contracts/src/profile.ts';
 import { ToolEnvelope } from '../../contracts/src/toolEnvelope.ts';
 import { HourlyScheduleSlot } from './dose_model.ts';
-import { ACTION_LIBRARY, ActionId, impactEstimate } from './impact_estimate.ts';
+import { ACTION_LIBRARY, ActionId, batchEvaluateActionsCRN, impactEstimate } from './impact_estimate.ts';
 import { PRIORS_VERSION } from './priors.ts';
 
 export interface ScoredActionItem {
@@ -111,6 +111,17 @@ export function scoreAndRankActions(
 
   const evaluated: ScoredActionItem[] = [];
 
+  const crnBatch = batchEvaluateActionsCRN(
+    {
+      profile,
+      target_member_age_band: priorityMember.age_band,
+      schedule,
+      forecast_pm25_hourly: forecastPm25Hourly,
+      actions: candidates,
+    },
+    asOf
+  );
+
   for (const id of candidates) {
     const def = ACTION_LIBRARY[id];
     const targetAgeForAction: AgeBand =
@@ -121,7 +132,7 @@ export function scoreAndRankActions(
     const feasibility = computeFeasibility(id, profile, targetAgeForAction);
     if (feasibility <= 0) continue;
 
-    const imp = impactEstimate(
+    const imp = crnBatch.get(id) ?? impactEstimate(
       {
         profile,
         target_member_age_band: targetAgeForAction,

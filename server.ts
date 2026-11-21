@@ -17,7 +17,9 @@ import {
   DELHI_WINTER_24H_PM25,
   WORKED_SCENARIOS,
   computeInhaledDose,
+  getMonteCarloMetrics,
   pickPriorityMember,
+  reindexForecastByClockHour,
   scoreAndRankActions,
   solveIndoorMassBalance,
 } from './packages/engines/src/index.ts';
@@ -26,6 +28,7 @@ import {
   GUIDANCE_LIBRARY,
   PRESET_REGIONS,
   fetchLiveAirQualitySummary,
+  getAqMetrics,
   roundCoarseCoord,
 } from './server/nirvaatTools.ts';
 
@@ -189,6 +192,10 @@ app.get('/api/health', (_req: Request, res: Response) => {
     ok: true,
     service: 'nirvaat-copilot',
     timestamp: new Date().toISOString(),
+    cache_metrics: {
+      monte_carlo: getMonteCarloMetrics(),
+      air_quality: getAqMetrics(),
+    },
   });
 });
 
@@ -345,13 +352,9 @@ app.post('/api/engines/plan', async (req: Request, res: Response) => {
         startHour = parsedHour;
       }
     }
-    forecastHourly = aqRes.data.hourly_forecast.map((p) => {
-      if (typeof p.pm2_5 === 'number') {
-        return p.pm2_5;
-      }
-      hasImputation = true;
-      return aqRes.data.pm2_5 ?? 120;
-    });
+    // Task 1: Re-index forecast array by LOCAL CLOCK HOUR so cooking, sleep, commute, and overnight use clock hours
+    forecastHourly = reindexForecastByClockHour(aqRes.data.hourly_forecast, startHour, aqRes.data.pm2_5 ?? 120);
+    hasImputation = aqRes.data.hourly_forecast.some((p) => typeof p.pm2_5 !== 'number');
   } else {
     forecastHourly = DELHI_WINTER_24H_PM25;
     hasImputation = true;

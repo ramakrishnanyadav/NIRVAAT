@@ -131,6 +131,81 @@ export function computeInhaledDose(input: DoseCalculationInput): {
   };
 }
 
+/**
+ * Re-indexes a 24-hour forecast array by LOCAL CLOCK HOUR (0..23).
+ * When Open-Meteo returns hourly predictions starting at a mid-day hour (e.g. 14:00),
+ * index 0 represents 14:00, index 10 represents 00:00 (midnight next day), etc.
+ * This function places each hour's PM2.5 at its corresponding clock hour index (0..23)
+ * so that cooking (8, 13, 20), commute (8, 9, 18), pre-sleep (21, 22), and overnight (22..6)
+ * reference actual clock hours rather than arbitrary array positions.
+ */
+export function reindexForecastByClockHour(
+  pointsOrNumbers: Array<{ time?: string; pm2_5?: number | null }> | number[],
+  startClockHour?: number,
+  fallbackVal = 120
+): number[] {
+  const aligned: number[] = Array(24).fill(fallbackVal);
+  const filled = Array(24).fill(false);
+
+  if (!Array.isArray(pointsOrNumbers) || pointsOrNumbers.length === 0) {
+    return aligned;
+  }
+
+  if (typeof pointsOrNumbers[0] === 'number') {
+    const nums = pointsOrNumbers as number[];
+    const start = startClockHour ?? 0;
+    for (let i = 0; i < Math.min(24, nums.length); i++) {
+      const clockH = (start + i) % 24;
+      aligned[clockH] = nums[i];
+      filled[clockH] = true;
+    }
+  } else {
+    const pts = pointsOrNumbers as Array<{ time?: string; pm2_5?: number | null }>;
+    for (let i = 0; i < pts.length; i++) {
+      const pt = pts[i];
+      let clockH = -1;
+      if (pt.time) {
+        const timePart = pt.time.split('T')[1];
+        if (timePart) {
+          const h = parseInt(timePart.split(':')[0], 10);
+          if (!Number.isNaN(h) && h >= 0 && h < 24) {
+            clockH = h;
+          }
+        }
+      }
+      if (clockH < 0) {
+        clockH = ((startClockHour ?? 0) + i) % 24;
+      }
+      if (typeof pt.pm2_5 === 'number' && Number.isFinite(pt.pm2_5)) {
+        aligned[clockH] = pt.pm2_5;
+        filled[clockH] = true;
+      }
+    }
+  }
+
+  // Fill any gaps by circular search from nearest valid reading
+  for (let h = 0; h < 24; h++) {
+    if (!filled[h]) {
+      let fallback = fallbackVal;
+      for (let offset = 1; offset <= 12; offset++) {
+        const prev = (h - offset + 24) % 24;
+        if (filled[prev]) {
+          fallback = aligned[prev];
+          break;
+        }
+        const next = (h + offset) % 24;
+        if (filled[next]) {
+          fallback = aligned[next];
+          break;
+        }
+      }
+      aligned[h] = fallback;
+    }
+  }
+
+  return aligned;
+}
+
 export function runDoseModelTool(
   input: DoseCalculationInput,
   callId = 'dose_1',

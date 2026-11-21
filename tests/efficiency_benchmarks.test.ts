@@ -83,42 +83,75 @@ test('Efficiency Benchmark 2: Impact cache strictly enforces MAX_IMPACT_CACHE_SI
 test('Efficiency Benchmark 3: Open-Meteo cache bounds (120) and coarse spatial hit sharing', async () => {
   clearAqCache();
 
-  // Test coarse rounding spatial hit
-  // Points (28.651, 77.312) and (28.649, 77.308) both map to coarse grid 28.65, 77.31
-  const region1 = {
-    city: 'Delhi NCR',
-    neighborhood: 'Anand Vihar',
-    grid_id: '28.65_77.31',
-    latitude: roundCoarseCoord(28.651),
-    longitude: roundCoarseCoord(77.312),
-    emergency_number: '112',
-    official_source: 'CPCB',
-    active_policy: 'GRAP IV',
-  };
+  // Mock upstream Open-Meteo API to avoid live network dependency in test runner
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const urlStr = String(input);
+    if (urlStr.includes('open-meteo.com')) {
+      const mockPayload = {
+        current: {
+          time: '2026-11-21T05:00',
+          pm2_5: 280.5,
+          pm10: 420.0,
+          us_aqi: 340,
+          european_aqi: 90,
+          nitrogen_dioxide: 65.2,
+        },
+        hourly: {
+          time: Array.from({ length: 24 }, (_, i) => `2026-11-21T${String(i).padStart(2, '0')}:00`),
+          pm2_5: Array.from({ length: 24 }, () => 280),
+          pm10: Array.from({ length: 24 }, () => 420),
+          us_aqi: Array.from({ length: 24 }, () => 340),
+        },
+      };
+      return new Response(JSON.stringify(mockPayload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return originalFetch(input, init);
+  }) as typeof fetch;
 
-  const region2 = {
-    city: 'Delhi NCR',
-    neighborhood: 'Anand Vihar East',
-    grid_id: '28.65_77.31',
-    latitude: roundCoarseCoord(28.649),
-    longitude: roundCoarseCoord(77.308),
-    emergency_number: '112',
-    official_source: 'CPCB',
-    active_policy: 'GRAP IV',
-  };
+  try {
+    // Test coarse rounding spatial hit
+    // Points (28.651, 77.312) and (28.649, 77.308) both map to coarse grid 28.65, 77.31
+    const region1 = {
+      city: 'Delhi NCR',
+      neighborhood: 'Anand Vihar',
+      grid_id: '28.65_77.31',
+      latitude: roundCoarseCoord(28.651),
+      longitude: roundCoarseCoord(77.312),
+      emergency_number: '112',
+      official_source: 'CPCB',
+      active_policy: 'GRAP IV',
+    };
 
-  assert.equal(region1.latitude, region2.latitude);
-  assert.equal(region1.longitude, region2.longitude);
+    const region2 = {
+      city: 'Delhi NCR',
+      neighborhood: 'Anand Vihar East',
+      grid_id: '28.65_77.31',
+      latitude: roundCoarseCoord(28.649),
+      longitude: roundCoarseCoord(77.308),
+      emergency_number: '112',
+      official_source: 'CPCB',
+      active_policy: 'GRAP IV',
+    };
 
-  const res1 = await fetchLiveAirQualitySummary(region1, 60, 'none');
-  assert.ok(res1.ok, 'First air quality query must succeed');
-  const sizeAfter1 = getAqCacheSize();
-  assert.ok(sizeAfter1 >= 1);
+    assert.equal(region1.latitude, region2.latitude);
+    assert.equal(region1.longitude, region2.longitude);
 
-  // Second fetch hits cache
-  const res2 = await fetchLiveAirQualitySummary(region2, 60, 'none');
-  assert.ok(res2.ok, 'Second air quality query must succeed');
-  const sizeAfter2 = getAqCacheSize();
-  assert.equal(sizeAfter1, sizeAfter2, 'Second regional query with identical coarse coords must hit cache');
-  assert.equal(res1.data.pm2_5, res2.data.pm2_5);
+    const res1 = await fetchLiveAirQualitySummary(region1, 60, 'none');
+    assert.ok(res1.ok, 'First air quality query must succeed');
+    const sizeAfter1 = getAqCacheSize();
+    assert.ok(sizeAfter1 >= 1);
+
+    // Second fetch hits cache
+    const res2 = await fetchLiveAirQualitySummary(region2, 60, 'none');
+    assert.ok(res2.ok, 'Second air quality query must succeed');
+    const sizeAfter2 = getAqCacheSize();
+    assert.equal(sizeAfter1, sizeAfter2, 'Second regional query with identical coarse coords must hit cache');
+    assert.equal(res1.data.pm2_5, res2.data.pm2_5);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

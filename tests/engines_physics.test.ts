@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { solveIndoorMassBalance } from '../packages/engines/src/indoor_model.ts';
-import { computeInhaledDose } from '../packages/engines/src/dose_model.ts';
+import { computeInhaledDose, reindexForecastByClockHour } from '../packages/engines/src/dose_model.ts';
 import { impactEstimate } from '../packages/engines/src/impact_estimate.ts';
 import { DELHI_WINTER_24H_PM25, WORKED_SCENARIOS } from '../packages/engines/src/mockData.ts';
 
@@ -291,4 +291,76 @@ test('Physics Defect 8.3: stability across 5 seeds at N=300 draws remains within
       `Seed variation ${diffPct.toFixed(2)}% exceeded ±5% tolerance around average ${avg.toFixed(2)}% (value: ${m}%)`
     );
   }
+});
+
+test('Time Alignment (Task 1): forecast starting at 14:00 correctly maps clock hours to cooking, overnight, and time-shift commute', () => {
+  // Construct a realistic 24-hour Open-Meteo telemetry curve starting at 14:00 (hour 14)
+  // Afternoon hours (14:00 to 17:00) are lowest PM2.5 (~65 ug/m3)
+  // Night inversion hours (22:00 to 06:00) are severe (~340 ug/m3)
+  // Morning commute hour (08:00) is peak inversion (~295 ug/m3)
+  const rawOpenMeteoForecast: Array<{ time: string; pm2_5: number }> = [];
+  for (let i = 0; i < 24; i++) {
+    const clockHour = (14 + i) % 24;
+    const day = 14 + i >= 24 ? '2026-11-22' : '2026-11-21';
+    const hourStr = clockHour.toString().padStart(2, '0');
+    const time = `${day}T${hourStr}:00`;
+
+    let pm25 = 120;
+    if (clockHour >= 13 && clockHour <= 16) {
+      pm25 = 65; // Cleanest afternoon window
+    } else if (clockHour >= 22 || clockHour <= 6) {
+      pm25 = 340; // Inversion night
+    } else if (clockHour === 8 || clockHour === 9) {
+      pm25 = 295; // Morning commute spike
+    }
+    rawOpenMeteoForecast.push({ time, pm2_5: pm25 });
+  }
+
+  assert.equal(rawOpenMeteoForecast[0].time, '2026-11-21T14:00');
+  assert.equal(rawOpenMeteoForecast[0].pm2_5, 65);
+
+  // 1. Verify reindexing by LOCAL CLOCK HOUR
+  const clockAligned = reindexForecastByClockHour(rawOpenMeteoForecast, 14);
+  assert.equal(clockAligned.length, 24, 'Reindexed forecast must contain exactly 24 clock hours');
+  assert.equal(clockAligned[14], 65, 'Clock hour 14 (14:00) must be 65 ug/m3');
+  assert.equal(clockAligned[23], 340, 'Clock hour 23 (23:00) must be 340 ug/m3');
+  assert.equal(clockAligned[0], 340, 'Clock hour 0 (00:00 midnight) must be 340 ug/m3');
+  assert.equal(clockAligned[8], 295, 'Clock hour 8 (08:00 morning commute) must be 295 ug/m3');
+
+  // 2. Schedule with commute at clock hour 8 and night rest at clock hours 22..6
+  const schedule = Array.from({ length: 24 }, (_, h) => ({
+    hour_index: h,
+    micro_env: h === 8 ? ('commute' as const) : ('home' as const),
+    activity: (h >= 22 || h <= 6) ? ('rest' as const) : ('light' as const),
+    mask: 'none' as const,
+  }));
+
+  const doseAligned = computeInhaledDose({
+    age_band: 'adult',
+    schedule,
+    indoor_pm25_hourly: clockAligned,
+    outdoor_pm25_hourly: clockAligned,
+  });
+
+  // Overnight dose covers 9 night hours (22:00–06:00) at 340 ug/m3 -> expected ~450+ ug
+  assert.ok(
+    doseAligned.overnightDoseUg > 400,
+    `Overnight dose should capture night hours (expected > 400, got ${doseAligned.overnightDoseUg})`
+  );
+
+  // 3. Impact estimate with time_shift_commute shifts morning commute from hour 8 (295 ug) to hour 14 (65 ug)
+  const sc = WORKED_SCENARIOS.leaky_1bhk_toddler;
+  const imp = impactEstimate({
+    profile: sc.profile,
+    target_member_age_band: 'adult',
+    schedule,
+    action: 'time_shift_commute',
+    forecast_pm25_hourly: clockAligned,
+    num_draws: 80,
+  });
+
+  assert.ok(
+    imp.value.dose_avoided_median_ug > 0,
+    `Expected positive dose avoided from shifting commute to 14:00 dip, got ${imp.value.dose_avoided_median_ug}`
+  );
 });
